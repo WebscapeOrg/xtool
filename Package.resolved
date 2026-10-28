@@ -1,5 +1,5 @@
 {
-  "originHash" : "70ed310397f7785149edfd3c75ea1be84b43c694430c1a7d8a48d1da0809d3b5",
+  "originHash" : "a4bc17b5590d4f7241ad6e7ac4985c5c76df8a5376e7022c2e24751f498ee975",
   "pins" : [
     {
       "identity" : "aexml",
@@ -53,6 +53,15 @@
       "state" : {
         "revision" : "57b6318128e3f901c93f4fbf98d1c1464ec168d3",
         "version" : "6.2.0"
+      }
+    },
+    {
+      "identity" : "opencombine",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/OpenCombine/OpenCombine.git",
+      "state" : {
+        "revision" : "8576f0d579b27020beccbccc3ea6844f3ddfc2c2",
+        "version" : "0.14.0"
       }
     },
     {
@@ -481,10 +490,9 @@
     {
       "identity" : "zsign",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/xtool-org/zsign",
+      "location" : "https://github.com/WebscapeOrg/zsign",
       "state" : {
-        "revision" : "19aab76b3f1388966a3ed4fc11b357f95aafc70b",
-        "version" : "1.8.0"
+        "revision" : "95c39faa4eeb7c0c85673155ef570276d5249770"
       }
     }
   ],
