@@ -137,6 +137,7 @@ public struct Planner: Sendable {
             matching: name
         )
         var resources: [Plan.Resource] = []
+        var modules: [Plan.Module] = []
         var visited: Set<String> = []
         var recordedLibraries: Set<String> = []
         var targets = library.targets.map { (graph.root, $0) }
@@ -147,6 +148,13 @@ public struct Planner: Sendable {
             guard visited.insert(targetName).inserted else { continue }
             if target.moduleType == "BinaryTarget" {
                 resources.append(.binaryTarget(name: targetName))
+            }
+            if target.moduleType == "SwiftTarget" {
+                modules.append(Plan.Module(
+                    name: targetName,
+                    package: targetPackage.name,
+                    isProductTarget: targetPackage.name == graph.root.name && library.targets.contains(targetName)
+                ))
             }
             if target.resources?.isEmpty == false {
                 resources.append(.bundle(package: targetPackage.name, target: targetName))
@@ -222,7 +230,8 @@ public struct Planner: Sendable {
             infoPlist: infoPlist,
             resources: resources,
             iconPath: iconPath,
-            entitlementsPath: entitlementsPath
+            entitlementsPath: entitlementsPath,
+            modules: modules
         )
     }
 
@@ -327,6 +336,8 @@ public struct Plan: Sendable {
         public var resources: [Resource]
         public var iconPath: String?
         public var entitlementsPath: String?
+        /// The Swift modules linked into this product: its library's own targets and their dependencies.
+        public var modules: [Module] = []
 
         public var targetName: String {
             "\(self.product)-\(self.type.targetSuffix)"
@@ -344,6 +355,14 @@ public struct Plan: Sendable {
                     .appendingPathExtension("appex")
             }
         }
+    }
+
+    public struct Module: Sendable, Hashable {
+        public var name: String
+        /// The package that declares the target, which names its folder in Swift Build's intermediates.
+        public var package: String
+        /// Whether the target belongs to the product's own library rather than to one of its dependencies.
+        public var isProductTarget: Bool
     }
 
     public enum ProductType: Sendable {

@@ -78,6 +78,9 @@ struct PackOperation {
         )
         let bundle = try await packer.pack()
 
+        // Before any signature, so the ad hoc one below and `--sign`'s both cover the metadata.
+        try await AppIntentsMetadata(buildSettings: buildSettings, plan: plan).generate(inApp: bundle)
+
         let productsWithEntitlements = plan
             .allProducts
             .compactMap { p in p.entitlementsPath.map { (p, $0) } }
