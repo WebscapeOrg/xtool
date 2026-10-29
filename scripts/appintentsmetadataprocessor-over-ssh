@@ -1,0 +1,260 @@
+#!/usr/bin/env -S python3 -I
+"""A stand-in for Xcode's appintentsmetadataprocessor that runs the real tool on a Mac over ssh.
+
+xtool runs the executable named by XTOOL_APPINTENTS_PROCESSOR with Apple's arguments when an app or extension
+declares App Intents. The Darwin SDK on Linux has no such tool, so point that variable at this script:
+
+    XTOOL_APPINTENTS_PROCESSOR=/path/to/xtool/scripts/appintentsmetadataprocessor-over-ssh
+    XTOOL_MAC_HOST=<ssh name of a Mac with Xcode>
+
+What it does, once per call:
+  1. Asks the Mac for its Xcode (XTOOL_MAC_DEVELOPER_DIR if set here, else the Mac's own DEVELOPER_DIR, else
+     /Applications/Xcode-beta.app/Contents/Developer), that Xcode's iOS or simulator SDK (chosen by whether
+     --target-triple names the simulator), its toolchain, its build version and its appintentsmetadataprocessor.
+  2. Copies the inputs (the file lists, every file they name, the const values, the sources they point to, and the
+     output bundle's Info.plist) into a fresh `mktemp -d /tmp/xtool-appintents.XXXXXX` on the Mac, under the same
+     absolute paths, and rewrites the paths inside the file lists and the const values to match.
+  3. Runs Apple's tool there with the Mac's SDK root, toolchain and Xcode build version in place of the ones given.
+  4. On success, copies Metadata.appintents back into --output (and the stringsdata file, if the tool wrote one).
+  5. Removes its folder on the Mac and its local staging folder.
+
+It exits with Apple's tool's exit status. Exit 64 means it was called wrongly; 69 means the Mac could not be used
+(including an ssh failure while the tool was meant to run, told apart from the tool's own status by a status file).
+"""
+
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+
+PROG = "appintentsmetadataprocessor-over-ssh"
+DEFAULT_DEVELOPER_DIR = "/Applications/Xcode-beta.app/Contents/Developer"
+REMOTE_TEMPLATE = "/tmp/xtool-appintents.XXXXXX"
+REMOTE_PATTERN = re.compile(r"^/tmp/xtool-appintents\.[A-Za-z0-9]{6}$")
+MARKER = "xtool-appintents-mac-tools"
+
+# Apple's long option names, with their short forms (from `appintentsmetadataprocessor --help`, Xcode 27.0).
+VALUE_OPTIONS = {
+    "--output": ["-o"],
+    "--toolchain-dir": ["-c"],
+    "--module-name": ["-m"],
+    "--sdk-root": ["-r"],
+    "--xcode-version": ["-xcv"],
+    "--platform-family": ["-pf"],
+    "--deployment-target": ["-dt"],
+    "--target-triple": ["-t"],
+    "--dependency-file": ["-p"],
+    "--stringsdata-file": ["-g"],
+    "--source-file-list": ["-sl"],
+    "--metadata-file-list": ["-mfl"],
+    "--static-metadata-file-list": ["-smfl"],
+    "--swift-const-vals-list": ["-scl"],
+}
+LONG_NAME = {alias: name for name, aliases in VALUE_OPTIONS.items() for alias in [name, *aliases]}
+FILE_LISTS = ["--source-file-list", "--swift-const-vals-list", "--metadata-file-list", "--static-metadata-file-list"]
+
+
+def fail(message, status):
+    print(f"{PROG}: {message}", file=sys.stderr)
+    sys.exit(status)
+
+
+def parse(argv):
+    """Split Apple's arguments into the options this script handles (by long name) and the rest, kept in order."""
+    options, passthrough = {}, []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        name, value = (arg.split("=", 1) + [None])[:2] if arg.startswith("-") else (arg, None)
+        if name in LONG_NAME:
+            if value is None:
+                if i + 1 >= len(argv):
+                    fail(f"{arg} needs a value", 64)
+                i += 1
+                value = argv[i]
+            options[LONG_NAME[name]] = value
+        else:
+            passthrough.append(arg)
+        i += 1
+    return options, passthrough
+
+
+def ssh(host, command, **kwargs):
+    # Never read xtool's own stdin unless a caller pipes something in.
+    kwargs.setdefault("stdin", subprocess.DEVNULL)
+    return subprocess.run(["ssh", "-o", "BatchMode=yes", host, command], **kwargs)
+
+
+class Stage:
+    """Inputs mirrored under `<local root>/fs<absolute path>`, which lands at `<remote>/fs<absolute path>` on the Mac."""
+
+    def __init__(self, local_root, remote_root):
+        self.fs = os.path.join(local_root, "fs")
+        self.remote_fs = remote_root + "/fs"
+        self.staged = set()
+
+    def local(self, path):
+        return self.fs + path
+
+    def remote(self, path):
+        return self.remote_fs + path
+
+    def copy(self, path):
+        if path in self.staged or not os.path.exists(path):
+            return
+        self.staged.add(path)
+        os.makedirs(os.path.dirname(self.local(path)), exist_ok=True)
+        if os.path.isdir(path):
+            shutil.copytree(path, self.local(path), symlinks=False, dirs_exist_ok=True)
+        else:
+            shutil.copyfile(path, self.local(path))
+
+    def write(self, path, text):
+        os.makedirs(os.path.dirname(self.local(path)), exist_ok=True)
+        with open(self.local(path), "w") as f:
+            f.write(text)
+
+
+def rewrite_const_values(stage, path):
+    """Point every `file` (at any depth: types and their properties) at the copy on the Mac, and copy that file."""
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "file" and isinstance(value, str) and os.path.isabs(value) and os.path.isfile(value):
+                    stage.copy(value)
+                    node[key] = stage.remote(value)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    with open(path) as f:
+        values = json.load(f)
+    walk(values)
+    stage.write(path, json.dumps(values))
+
+
+def stage_file_list(stage, option, list_path):
+    """Copy a file list and everything it names, rewritten to the Mac's paths."""
+    with open(list_path) as f:
+        entries = [os.path.abspath(line.rstrip("\n")) for line in f if line.strip()]
+    for entry in entries:
+        if option == "--swift-const-vals-list" and os.path.isfile(entry):
+            rewrite_const_values(stage, entry)
+        else:
+            stage.copy(entry)
+    stage.write(list_path, "".join(stage.remote(entry) + "\n" for entry in entries))
+
+
+def mac_tools(host, triple):
+    """The Mac's developer dir, SDK root, processor and Xcode build version, and a fresh staging folder there."""
+    sdk = "iphonesimulator" if "simulator" in (triple or "") else "iphoneos"
+    local_choice = os.environ.get("XTOOL_MAC_DEVELOPER_DIR")
+    developer_dir = shlex.quote(local_choice) if local_choice else f'"${{DEVELOPER_DIR:-{DEFAULT_DEVELOPER_DIR}}}"'
+    script = f"""set -e
+export DEVELOPER_DIR={developer_dir}
+sdk_root=$(xcrun --sdk {sdk} --show-sdk-path)
+processor=$(xcrun --find appintentsmetadataprocessor)
+build=$(xcodebuild -version | sed -n 's/^Build version //p')
+stage=$(mktemp -d {REMOTE_TEMPLATE})
+printf '%s\\n' {MARKER} "$stage" "$DEVELOPER_DIR" "$sdk_root" "$processor" "$build"
+"""
+    result = ssh(host, script, capture_output=True, text=True)
+    # Anything a shell startup file prints comes before the marker.
+    output = result.stdout.splitlines()
+    lines = output[len(output) - output[::-1].index(MARKER):] if MARKER in output else []
+    if result.returncode != 0 or len(lines) != 5 or not all(lines[:4]):
+        sys.stderr.write(result.stderr)
+        fail(f"could not find Xcode's appintentsmetadataprocessor on {host} (ssh exit {result.returncode})", 69)
+    return lines
+
+
+def main():
+    host = os.environ.get("XTOOL_MAC_HOST", "")
+    if not host:
+        fail("set XTOOL_MAC_HOST to the ssh name of a Mac with Xcode (for example in ~/.ssh/config)", 64)
+    options, passthrough = parse(sys.argv[1:])
+    for required in ["--output", "--module-name", "--target-triple", "--source-file-list", "--swift-const-vals-list"]:
+        if required not in options:
+            fail(f"missing {required}", 64)
+    output = os.path.abspath(options["--output"])
+    strings = os.path.abspath(options["--stringsdata-file"]) if "--stringsdata-file" in options else None
+
+    remote, developer_dir, sdk_root, processor, build = mac_tools(host, options["--target-triple"])
+    if not REMOTE_PATTERN.match(remote):
+        fail(f"unexpected staging folder from mktemp on {host}: {remote!r}", 69)
+    local_root = None
+    try:
+        local_root = tempfile.mkdtemp(prefix="xtool-appintents.")
+        stage = Stage(local_root, remote)
+        for option in FILE_LISTS:
+            if option in options:
+                path = os.path.abspath(options[option])
+                stage_file_list(stage, option, path)
+                options[option] = stage.remote(path)
+        if "--dependency-file" in options:
+            path = os.path.abspath(options["--dependency-file"])
+            stage.copy(path)
+            options["--dependency-file"] = stage.remote(path)
+        # The tool writes Metadata.appintents into --output; give it the bundle's Info.plist and nothing else.
+        os.makedirs(os.path.join(local_root, "out", "bundle"))
+        os.makedirs(os.path.join(local_root, "out", "strings"))
+        if os.path.isfile(os.path.join(output, "Info.plist")):
+            shutil.copyfile(os.path.join(output, "Info.plist"), os.path.join(local_root, "out", "bundle", "Info.plist"))
+        options["--output"] = remote + "/out/bundle"
+        if strings:
+            options["--stringsdata-file"] = remote + "/out/strings/" + os.path.basename(strings)
+        options["--sdk-root"] = sdk_root
+        options["--toolchain-dir"] = developer_dir + "/Toolchains/XcodeDefault.xctoolchain"
+        if build:
+            options["--xcode-version"] = build
+
+        tar = subprocess.Popen(["tar", "-C", local_root, "-cf", "-", "fs", "out"], stdout=subprocess.PIPE)
+        upload = ssh(host, f"tar -C {shlex.quote(remote)} -xf -", stdin=tar.stdout)
+        tar.stdout.close()
+        if tar.wait() != 0 or upload.returncode != 0:
+            fail(f"could not copy the inputs to {host}", 69)
+
+        arguments = [processor] + [x for name, value in options.items() for x in (name, value)] + passthrough
+        quoted_remote = shlex.quote(remote)
+        command = (
+            f"export DEVELOPER_DIR={shlex.quote(developer_dir)}; cd {quoted_remote} || exit 69; "
+            f"{shlex.join(arguments)}; rc=$?; echo $rc > {quoted_remote}/status; exit $rc"
+        )
+        status = ssh(host, command).returncode
+        if status != 0:
+            recorded = ssh(host, f"cat {quoted_remote}/status", capture_output=True, text=True).stdout.strip()
+            if recorded != str(status):
+                fail(f"lost the connection to {host} while running the tool (ssh exit {status})", 69)
+            return status
+
+        received = os.path.join(local_root, "received")
+        os.makedirs(received)
+        download = ssh(host, f"tar -C {quoted_remote}/out -cf - .", stdout=subprocess.PIPE)
+        if download.returncode != 0:
+            fail(f"could not copy the result back from {host}", 69)
+        if subprocess.run(["tar", "-C", received, "-xf", "-"], input=download.stdout).returncode != 0:
+            fail(f"could not unpack the result from {host}", 69)
+        metadata = os.path.join(received, "bundle", "Metadata.appintents")
+        if os.path.isdir(metadata):
+            shutil.rmtree(os.path.join(output, "Metadata.appintents"), ignore_errors=True)
+            shutil.copytree(metadata, os.path.join(output, "Metadata.appintents"))
+        if strings and os.path.isfile(os.path.join(received, "strings", os.path.basename(strings))):
+            shutil.copyfile(os.path.join(received, "strings", os.path.basename(strings)), strings)
+        return 0
+    finally:
+        if local_root:
+            shutil.rmtree(local_root, ignore_errors=True)
+        # Only ever the folder mktemp just made for this call (checked against the template above).
+        if ssh(host, f"rm -rf -- {shlex.quote(remote)}", stdout=subprocess.DEVNULL).returncode != 0:
+            print(f"{PROG}: warning: could not remove {remote} on {host}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
