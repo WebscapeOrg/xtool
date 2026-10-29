@@ -144,3 +144,15 @@ extension WiFiAwareEntitlement: EntitlementWithCapability {
         DeveloperServicesCapability(rawName: "WIFI_AWARE", isFree: false)
     }
 }
+
+extension TimeSensitiveNotificationsEntitlement: EntitlementWithCapability {
+    var capability: DeveloperServicesCapability {
+        DeveloperServicesCapability(rawName: "USERNOTIFICATIONS_TIMESENSITIVE", isFree: false)
+    }
+}
+
+extension CommunicationNotificationsEntitlement: EntitlementWithCapability {
+    var capability: DeveloperServicesCapability {
+        DeveloperServicesCapability(rawName: "USERNOTIFICATIONS_COMMUNICATION", isFree: false)
+    }
+}

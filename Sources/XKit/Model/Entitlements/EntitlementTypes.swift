@@ -29,6 +29,8 @@ extension EntitlementContainer {
         WiFiAwareEntitlement.self,
         HomeKitEntitlement.self,
         HealthKitEntitlement.self,
+        TimeSensitiveNotificationsEntitlement.self,
+        CommunicationNotificationsEntitlement.self,
     ]
 }
 
@@ -180,6 +182,20 @@ public struct HomeKitEntitlement: Entitlement, RawRepresentable {
 
 public struct HealthKitEntitlement: Entitlement, RawRepresentable {
     public static let identifier = "com.apple.developer.healthkit"
+
+    public var rawValue: Bool
+    public init(rawValue: Bool) { self.rawValue = rawValue }
+}
+
+public struct TimeSensitiveNotificationsEntitlement: Entitlement, RawRepresentable {
+    public static let identifier = "com.apple.developer.usernotifications.time-sensitive"
+
+    public var rawValue: Bool
+    public init(rawValue: Bool) { self.rawValue = rawValue }
+}
+
+public struct CommunicationNotificationsEntitlement: Entitlement, RawRepresentable {
+    public static let identifier = "com.apple.developer.usernotifications.communication"
 
     public var rawValue: Bool
     public init(rawValue: Bool) { self.rawValue = rawValue }
