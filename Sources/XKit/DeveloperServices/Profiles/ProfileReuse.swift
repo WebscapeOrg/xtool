@@ -77,6 +77,12 @@ public enum ProfileReuse: Equatable, Sendable {
     /// made from the groups the App ID has now. With no profile, several, or one that is not
     /// active or cannot be read, the groups are unknown and are assigned again.
     public static func assignedGroups(_ profiles: [ListedProfile]) -> AssignedGroups {
+        assigned(AppGroupEntitlement.identifier, in: profiles)
+    }
+
+    /// The same reading for any list Apple fills from what is assigned to the App ID: its app
+    /// groups, or its iCloud containers under `com.apple.developer.icloud-container-identifiers`.
+    public static func assigned(_ key: String, in profiles: [ListedProfile]) -> AssignedGroups {
         guard profiles.count == 1 else {
             return .unknown("it has \(profiles.count) profiles, not one")
         }
@@ -86,7 +92,7 @@ public enum ProfileReuse: Equatable, Sendable {
         guard let granted = profiles[0].entitlements else {
             return .unknown("its profile could not be read")
         }
-        return .known(Set(granted["com.apple.security.application-groups"] as? [String] ?? []))
+        return .known(Set(granted[key] as? [String] ?? []))
     }
 
     public static func decide(_ profile: Profile, for build: Build, now: Date = Date()) -> ProfileReuse {
