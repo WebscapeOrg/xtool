@@ -51,9 +51,14 @@ public enum ProfileReuse: Equatable, Sendable {
         }
     }
 
-    public static func decide(_ profile: Profile, for build: Build) -> ProfileReuse {
+    public struct UnreadableEntitlements: Error {}
+
+    public static func decide(_ profile: Profile, for build: Build, now: Date = Date()) -> ProfileReuse {
         guard profile.state == "ACTIVE" else {
             return .replace("Apple lists it as \(profile.state ?? "having no state")")
+        }
+        guard profile.expiry > now else {
+            return .replace("it has expired")
         }
         guard profile.type == "IOS_APP_DEVELOPMENT" else {
             return .replace("its type is \(profile.type ?? "missing")")
@@ -108,7 +113,10 @@ public enum ProfileReuse: Equatable, Sendable {
     /// entitlements and the profile's are compared in the same form.
     public static func dictionary(_ entitlements: Entitlements) throws -> [String: Any] {
         let data = try PropertyListEncoder().encode(entitlements)
-        return try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] ?? [:]
+        guard let dictionary = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            throw UnreadableEntitlements()
+        }
+        return dictionary
     }
 
     private static func plist(_ value: Any) -> Data? {

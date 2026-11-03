@@ -16,7 +16,8 @@ private func entitlements(_ body: String) throws -> [String: Any] {
     return try ProfileReuse.dictionary(PropertyListDecoder().decode(Entitlements.self, from: Data(plist.utf8)))
 }
 
-/// The profile xtool made for Marmalade on 2 November 2026, with its team and devices masked.
+/// The entitlements of the profile xtool made for Marmalade on 2 November 2026: the same keys and
+/// shapes, with the team masked.
 private func profileEntitlements(extra: String = "") throws -> [String: Any] {
     try entitlements("""
     <key>aps-environment</key><string>development</string>
@@ -140,4 +141,10 @@ private func build(devices: Set<String> = [phone, ipad], entitlements: [String: 
 @Test func otherValuesMustBeEqual() {
     #expect(ProfileReuse.grants(2, 2))
     #expect(!ProfileReuse.grants(2, 3))
+}
+
+@Test func profileThatHasExpiredIsReplaced() throws {
+    let expired = try profile()
+    #expect(ProfileReuse.decide(expired, for: try build(), now: expired.expiry) == .replace("it has expired"))
+    #expect(ProfileReuse.decide(expired, for: try build(), now: expired.expiry.addingTimeInterval(-1)) == .reuse)
 }
