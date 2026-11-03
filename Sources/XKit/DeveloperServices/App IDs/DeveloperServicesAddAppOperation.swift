@@ -367,16 +367,17 @@ extension DeveloperServicesAddAppOperation {
     /// them with `==` found a difference on every build and sent the setting again each time,
     /// which marks the App ID's profile invalid. A wanted option is covered when Apple's setting
     /// with the same key lists it and does not mark it disabled. When Apple returns no setting with
-    /// that key, nothing is known to differ, so nothing is sent, as for a capability Apple returns
-    /// without attributes.
+    /// that key, or the key without options, nothing is known to differ, so nothing is sent, as for
+    /// a capability Apple returns without attributes.
     static func settings(
         _ held: [Components.Schemas.CapabilitySetting]?,
         cover wanted: [Components.Schemas.CapabilitySetting]
     ) -> Bool {
         wanted.allSatisfy { want in
-            guard let have = (held ?? []).first(where: { name(of: $0.key) == name(of: want.key) }) else { return true }
+            guard let have = (held ?? []).first(where: { name(of: $0.key) == name(of: want.key) }),
+                  let options = have.options, !options.isEmpty else { return true }
             return (want.options ?? []).allSatisfy { option in
-                (have.options ?? []).contains { name(of: $0.key) == name(of: option.key) && $0.enabled != false }
+                options.contains { name(of: $0.key) == name(of: option.key) && $0.enabled != false }
             }
         }
     }
