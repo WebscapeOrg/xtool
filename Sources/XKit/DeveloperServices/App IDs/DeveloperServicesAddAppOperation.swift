@@ -219,20 +219,39 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
         }
 
         if var entitlementsArray = try? entitlements.entitlements(),
-            let groupsIdx = entitlementsArray.firstIndex(where: { $0 is AppGroupEntitlement }),
-            let groupsEntitlement = entitlementsArray[groupsIdx] as? AppGroupEntitlement {
-            let groups = groupsEntitlement.rawValue
+            entitlementsArray.contains(where: { $0 is AppGroupEntitlement || $0 is ICloudContainerIdentifiersEntitlement }) {
+            // Read before anything is assigned: assigning groups marks the profile invalid,
+            // while the containers it was made with are still the App ID's.
+            let profiles = await listedProfiles(appID: appID)
 
-            if let operation = DeveloperServicesAssignAppGroupsOperation(
-                context: self.context,
-                groupIDs: groups,
-                appID: appID,
-                assignedGroupIDs: await assignedGroupIDs(appID: appID)
-            ) {
+            if let groupsIdx = entitlementsArray.firstIndex(where: { $0 is AppGroupEntitlement }),
+                let groupsEntitlement = entitlementsArray[groupsIdx] as? AppGroupEntitlement,
+                let operation = DeveloperServicesAssignAppGroupsOperation(
+                    context: self.context,
+                    groupIDs: groupsEntitlement.rawValue,
+                    appID: appID,
+                    assignedGroupIDs: assigned(AppGroupEntitlement.identifier, "app groups", in: profiles, appID: appID)
+                        .map { Set($0.map(DeveloperServicesAppGroup.GroupID.init(rawValue:))) }
+                ) {
                 let newGroups = try await operation.perform()
                 entitlementsArray[groupsIdx] = AppGroupEntitlement(rawValue: newGroups)
-                try entitlements.setEntitlements(entitlementsArray)
             }
+
+            if let containersIdx = entitlementsArray.firstIndex(where: { $0 is ICloudContainerIdentifiersEntitlement }),
+                let containersEntitlement = entitlementsArray[containersIdx] as? ICloudContainerIdentifiersEntitlement,
+                let operation = DeveloperServicesAssignCloudContainersOperation(
+                    context: self.context,
+                    containerIDs: containersEntitlement.rawValue,
+                    appID: appID,
+                    assignedContainerIDs: assigned(
+                        ICloudContainerIdentifiersEntitlement.identifier, "iCloud containers", in: profiles, appID: appID
+                    ).map { Set($0.map(DeveloperServicesCloudContainer.Identifier.init(rawValue:))) }
+                ) {
+                let newContainers = try await operation.perform()
+                entitlementsArray[containersIdx] = ICloudContainerIdentifiersEntitlement(rawValue: newContainers)
+            }
+
+            try entitlements.setEntitlements(entitlementsArray)
         }
 
         let mobileprovision = try await DeveloperServicesFetchProfileOperation(
@@ -249,13 +268,10 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
         )
     }
 
-    /// The app groups the App ID already has (see ProfileReuse.assignedGroups), or nil, which
-    /// assigns them again, with the reason printed.
-    private func assignedGroupIDs(appID: Components.Schemas.BundleId) async -> Set<DeveloperServicesAppGroup.GroupID>? {
-        let name = appID.attributes?.identifier ?? appID.id
-        let listed: [ProfileReuse.ListedProfile]
+    /// The App ID's profiles with their states and entitlements, or why Apple did not return them.
+    private func listedProfiles(appID: Components.Schemas.BundleId) async -> Result<[ProfileReuse.ListedProfile], any Swift.Error> {
         do {
-            listed = try await context.developerAPIClient.bundleIdsProfilesGetToManyRelated(
+            return .success(try await context.developerAPIClient.bundleIdsProfilesGetToManyRelated(
                 path: .init(id: appID.id),
                 query: .init(fields_lbrack_profiles_rbrack_: [.profileState, .profileContent])
             ).ok.body.json.data.map { profile in
@@ -266,16 +282,34 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                         .flatMap { try? Mobileprovision(data: $0).digest() }
                         .flatMap { try? ProfileReuse.dictionary($0.entitlements) }
                 )
-            }
+            })
         } catch {
-            print("The app groups of \(name) are not known: Apple did not return its profiles (\(error.localizedDescription))")
+            return .failure(error)
+        }
+    }
+
+    /// What the App ID already has under `key` (see ProfileReuse.assigned), or nil, which
+    /// assigns it again, with the reason printed.
+    private func assigned(
+        _ key: String,
+        _ what: String,
+        in profiles: Result<[ProfileReuse.ListedProfile], any Swift.Error>,
+        appID: Components.Schemas.BundleId
+    ) -> Set<String>? {
+        let name = appID.attributes?.identifier ?? appID.id
+        let listed: [ProfileReuse.ListedProfile]
+        switch profiles {
+        case .success(let value):
+            listed = value
+        case .failure(let error):
+            print("The \(what) of \(name) are not known: Apple did not return its profiles (\(error.localizedDescription))")
             return nil
         }
-        switch ProfileReuse.assignedGroups(listed) {
-        case .known(let groups):
-            return Set(groups.map(DeveloperServicesAppGroup.GroupID.init(rawValue:)))
+        switch ProfileReuse.assigned(key, in: listed) {
+        case .known(let values):
+            return values
         case .unknown(let reason):
-            print("The app groups of \(name) are not known: \(reason)")
+            print("The \(what) of \(name) are not known: \(reason)")
             return nil
         }
     }

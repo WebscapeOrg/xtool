@@ -67,6 +67,22 @@ extension DataProtectionEntitlement: EntitlementWithCapability {
     }
 }
 
+extension ICloudContainerIdentifiersEntitlement: EntitlementWithCapability {
+    var capability: DeveloperServicesCapability {
+        // XCODE_6 is the iCloud setting that includes CloudKit; XCODE_5 is iCloud Documents only.
+        DeveloperServicesCapability(
+            .icloud,
+            isFree: false,
+            settings: [
+                .init(
+                    key: .init(.icloudVersion),
+                    options: [.init(key: .init(.xcode6))]
+                )
+            ]
+        )
+    }
+}
+
 // MARK: - Boolean Features
 
 // https://github.com/fastlane/fastlane/blob/master/spaceship/lib/spaceship/portal/app_service.rb

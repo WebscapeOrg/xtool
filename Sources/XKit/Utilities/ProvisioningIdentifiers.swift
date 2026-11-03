@@ -14,6 +14,7 @@ extension ProvisioningIdentifiers {
 
     static let idPrefix = "XTL-"
     static let groupPrefix = "group."
+    static let cloudContainerPrefix = "iCloud."
     static let namePrefix = "XTool "
 
     static func sanitize(identifier: String) -> String {
@@ -42,6 +43,23 @@ extension ProvisioningIdentifiers {
 
     static func groupName(fromSanitized sanitized: String) -> String {
         "\(Self.namePrefix)group \(safeify(identifier: sanitized))"
+    }
+
+    static func sanitize(containerID: DeveloperServicesCloudContainer.Identifier) -> String {
+        var id = containerID.rawValue
+        if id.hasPrefix(Self.cloudContainerPrefix) { id.removeFirst(Self.cloudContainerPrefix.count) }
+        return sanitize(identifier: id)
+    }
+
+    static func containerID(
+        fromSanitized sanitized: String,
+        context: SigningContext
+    ) -> DeveloperServicesCloudContainer.Identifier {
+        .init(rawValue: "\(Self.cloudContainerPrefix)\(identifier(fromSanitized: sanitized, context: context))")
+    }
+
+    static func containerName(fromSanitized sanitized: String) -> String {
+        "\(Self.namePrefix)iCloud \(safeify(identifier: sanitized))"
     }
 
     static func appName(fromSanitized sanitized: String) -> String {

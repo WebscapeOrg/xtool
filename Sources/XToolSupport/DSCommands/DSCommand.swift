@@ -60,6 +60,7 @@ struct DSCommand: AsyncParsableCommand {
             DSDevicesCommand.self,
             DSProfilesCommand.self,
             DSAnisetteCommand.self,
+            DSCloudContainersCommand.self,
         ]
     )
 }

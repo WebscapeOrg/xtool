@@ -20,6 +20,7 @@ extension EntitlementContainer {
 //        AssociatedDomainsEntitlement.self,
         APSEnvironmentEntitlement.self,
         AppGroupEntitlement.self,
+        ICloudContainerIdentifiersEntitlement.self,
 //        NetworkExtensionEntitlement.self,
         MultipathEntitlement.self,
         VPNConfigurationEntitlement.self,
@@ -72,6 +73,24 @@ public struct AppGroupEntitlement: Entitlement, RawRepresentable {
 
     public init(from decoder: Decoder) throws {
         rawValue = try decoder.singleValueContainer().decode([DeveloperServicesAppGroup.GroupID].self)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+/// The iCloud containers an app uses. Like app groups, xtool renames each one to the team's
+/// prefixed form (`iCloud.XTL-<team>.<id>`) and creates it on the team when it is missing.
+/// The other iCloud keys, such as `com.apple.developer.icloud-services`, are signed as written.
+public struct ICloudContainerIdentifiersEntitlement: Entitlement, RawRepresentable {
+    public static let identifier = "com.apple.developer.icloud-container-identifiers"
+
+    public var rawValue: [DeveloperServicesCloudContainer.Identifier]
+    public init(rawValue: [DeveloperServicesCloudContainer.Identifier]) { self.rawValue = rawValue }
+
+    public init(from decoder: Decoder) throws {
+        rawValue = try decoder.singleValueContainer().decode([DeveloperServicesCloudContainer.Identifier].self)
     }
     public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
