@@ -94,8 +94,14 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
         for (typ, cap) in existingCapabilities {
             if let wantedSettings = wantedCapabilities[typ] {
                 // Invariant: without attributes the settings Apple holds are unknown, so they
-                // are left as they are; sending them again would invalidate every profile.
-                guard let attributes = cap.attributes else { continue }
+                // are left as they are; sending them again would invalidate every profile. A
+                // changed setting therefore does not reach an existing App ID, and says so.
+                guard let attributes = cap.attributes else {
+                    if !wantedSettings.isEmpty {
+                        print("Leaving the settings of \(typ.logName) on \(newBundleID) as they are: Apple did not return them to compare")
+                    }
+                    continue
+                }
                 if wantedSettings != (attributes.settings ?? []) {
                     print("Updating \(typ.logName) on \(newBundleID): Apple has \(attributes.settings ?? []), the app wants \(wantedSettings)")
                     _ = try await context.developerAPIClient.bundleIdCapabilitiesUpdateInstance(
@@ -116,7 +122,10 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                     .ok
                 }
             } else {
-                // DeveloperServices doesn't allow deleting these capabilities
+                // DeveloperServices doesn't allow deleting these capabilities.
+                // Invariant: a capability Apple returns without attributes is never removed, as
+                // before. Typed from its id instead, any capability Apple holds that the app does
+                // not sign for would be removed, changing the App ID on every build.
                 let requiredCapabilities: Set<Components.Schemas.CapabilityType.Value1Payload> = [.inAppPurchase]
                 if let capType = cap.attributes?.capabilityType?.value1, !requiredCapabilities.contains(capType) {
                     print("Removing \(typ.logName) from \(newBundleID)")
@@ -240,24 +249,35 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
         )
     }
 
-    /// The app groups the App ID already has, read from its one active profile: Apple marks
-    /// an App ID's profiles invalid when its groups are assigned again, even to the same
-    /// groups (Magpie's two-build test of 3 November 2026), so the groups are assigned only
-    /// when they differ. A profile is active only while the App ID still has the groups it
-    /// was made with, so its groups are the App ID's. Nil when that cannot be read.
+    /// The app groups the App ID already has (see ProfileReuse.assignedGroups), or nil, which
+    /// assigns them again, with the reason printed.
     private func assignedGroupIDs(appID: Components.Schemas.BundleId) async -> Set<DeveloperServicesAppGroup.GroupID>? {
-        guard let profiles = try? await context.developerAPIClient.bundleIdsProfilesGetToManyRelated(
-            path: .init(id: appID.id),
-            query: .init(fields_lbrack_profiles_rbrack_: [.profileState, .profileContent])
-        ).ok.body.json.data,
-            profiles.count == 1,
-            profiles[0].attributes?.profileState?.value1 == .active,
-            let content = profiles[0].attributes?.profileContent.flatMap({ Data(base64Encoded: $0) }),
-            let digest = try? Mobileprovision(data: content).digest(),
-            let granted = try? ProfileReuse.dictionary(digest.entitlements),
-            let groups = granted["com.apple.security.application-groups"] as? [String]
-            else { return nil }
-        return Set(groups.map(DeveloperServicesAppGroup.GroupID.init(rawValue:)))
+        let name = appID.attributes?.identifier ?? appID.id
+        let listed: [ProfileReuse.ListedProfile]
+        do {
+            listed = try await context.developerAPIClient.bundleIdsProfilesGetToManyRelated(
+                path: .init(id: appID.id),
+                query: .init(fields_lbrack_profiles_rbrack_: [.profileState, .profileContent])
+            ).ok.body.json.data.map { profile in
+                ProfileReuse.ListedProfile(
+                    state: profile.attributes?.profileState.map { $0.value1?.rawValue ?? $0.value2 ?? "" },
+                    entitlements: profile.attributes?.profileContent
+                        .flatMap { Data(base64Encoded: $0) }
+                        .flatMap { try? Mobileprovision(data: $0).digest() }
+                        .flatMap { try? ProfileReuse.dictionary($0.entitlements) }
+                )
+            }
+        } catch {
+            print("The app groups of \(name) are not known: Apple did not return its profiles (\(error.localizedDescription))")
+            return nil
+        }
+        switch ProfileReuse.assignedGroups(listed) {
+        case .known(let groups):
+            return Set(groups.map(DeveloperServicesAppGroup.GroupID.init(rawValue:)))
+        case .unknown(let reason):
+            print("The app groups of \(name) are not known: \(reason)")
+            return nil
+        }
     }
 
     /// Registers the app + its extensions, returning the profile and entitlements of each

@@ -168,3 +168,27 @@ private func build(devices: Set<String> = [phone, ipad], entitlements: [String: 
     let fromApple = Components.Schemas.CapabilityType(value1: .appGroups, value2: "APP_GROUPS")
     #expect(fromApple.normalized == Components.Schemas.CapabilityType(.appGroups))
 }
+
+/// Assigning an App ID's groups again, even unchanged, made Apple mark its profile invalid
+/// (Magpie's two-build test of 3 November 2026), so they are read from the one active profile.
+@Test func groupsAreReadFromTheOneActiveProfile() throws {
+    let active = ProfileReuse.ListedProfile(state: "ACTIVE", entitlements: try profileEntitlements())
+    #expect(ProfileReuse.assignedGroups([active]) == .known(["group.XTL-\(team).net.anotherdave.family"]))
+
+    let withoutGroups = ProfileReuse.ListedProfile(
+        state: "ACTIVE", entitlements: try entitlements("<key>get-task-allow</key><true/>")
+    )
+    #expect(ProfileReuse.assignedGroups([withoutGroups]) == .known([]))
+}
+
+@Test func groupsAreUnknownUnlessThereIsOneReadableActiveProfile() throws {
+    let active = ProfileReuse.ListedProfile(state: "ACTIVE", entitlements: try profileEntitlements())
+    #expect(ProfileReuse.assignedGroups([]) == .unknown("it has 0 profiles, not one"))
+    #expect(ProfileReuse.assignedGroups([active, active]) == .unknown("it has 2 profiles, not one"))
+    #expect(
+        ProfileReuse.assignedGroups([.init(state: "INVALID", entitlements: try profileEntitlements())])
+            == .unknown("Apple lists its profile as INVALID")
+    )
+    #expect(ProfileReuse.assignedGroups([.init(state: nil, entitlements: nil)]) == .unknown("Apple lists its profile as having no state"))
+    #expect(ProfileReuse.assignedGroups([.init(state: "ACTIVE", entitlements: nil)]) == .unknown("its profile could not be read"))
+}
