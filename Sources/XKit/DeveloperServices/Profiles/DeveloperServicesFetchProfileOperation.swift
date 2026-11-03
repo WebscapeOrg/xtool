@@ -133,13 +133,16 @@ public struct DeveloperServicesFetchProfileOperation: DeveloperServicesOperation
         id: String,
         devices: [Components.Schemas.Device]
     ) async throws -> Mobileprovision? {
-        let profile = try await context.developerAPIClient.profilesGetInstance(
+        // Invariant: a profile that cannot be read is replaced, as every profile was
+        // before reuse, so reading it never fails a build that used to succeed.
+        guard let profile = try? await context.developerAPIClient.profilesGetInstance(
             path: .init(id: id),
             query: .init(fields_lbrack_profiles_rbrack_: [.profileState, .profileType, .profileContent, .uuid])
-        )
-        .ok.body.json.data
+        ).ok.body.json.data else {
+            print("Replacing profile \(id) for \(bundleID): Apple did not return it")
+            return nil
+        }
         let attributes = profile.attributes
-        let uuid = attributes?.uuid ?? id
 
         guard let content = attributes?.profileContent.flatMap({ Data(base64Encoded: $0) }),
               let mobileprovision = try? Mobileprovision(data: content),
@@ -147,7 +150,13 @@ public struct DeveloperServicesFetchProfileOperation: DeveloperServicesOperation
               let grantedEntitlements = try? ProfileReuse.dictionary(digest.entitlements),
               let signedEntitlements = try? ProfileReuse.dictionary(entitlements)
               else {
-            print("Replacing profile \(uuid) for \(bundleID): its content could not be read")
+            print("Replacing profile \(attributes?.uuid ?? id) for \(bundleID): its content could not be read")
+            return nil
+        }
+        let uuid = digest.uuid
+        let udids = devices.map { $0.attributes?.udid }
+        guard !udids.contains(nil) else {
+            print("Replacing profile \(uuid) for \(bundleID): a registered device has no UDID to check it by")
             return nil
         }
 
@@ -163,7 +172,7 @@ public struct DeveloperServicesFetchProfileOperation: DeveloperServicesOperation
             for: ProfileReuse.Build(
                 certificateSerial: signingInfo.certificate.serialNumber(),
                 certificateExpiry: signingInfo.certificate.raw.notValidAfter,
-                devices: Set(devices.compactMap { $0.attributes?.udid }),
+                devices: Set(udids.compactMap { $0 }),
                 entitlements: signedEntitlements
             )
         )
