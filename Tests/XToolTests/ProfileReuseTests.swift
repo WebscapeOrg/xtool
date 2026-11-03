@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import XKit
+import DeveloperAPI
 
 private let team = "ABCDE12345"
 private let phone = "00008120-000000000000000A"
@@ -147,4 +148,23 @@ private func build(devices: Set<String> = [phone, ipad], entitlements: [String: 
     let expired = try profile()
     #expect(ProfileReuse.decide(expired, for: try build(), now: expired.expiry) == .replace("it has expired"))
     #expect(ProfileReuse.decide(expired, for: try build(), now: expired.expiry.addingTimeInterval(-1)) == .reuse)
+}
+
+/// Apple's Xcode API sent Marmalade's capabilities on 3 November 2026 with these ids and no
+/// attributes; read as untyped, each looked new on every build, was added again, and Apple
+/// marked the profile invalid before the next build could reuse it.
+@Test func capabilityWithoutAttributesIsTypedByItsID() {
+    let appID = Components.Schemas.BundleId(_type: .bundleIds, id: "44N3N8QMR4")
+    let push = Components.Schemas.BundleIdCapability(_type: .bundleIdCapabilities, id: "44N3N8QMR4_PUSH_NOTIFICATIONS")
+    let unknown = Components.Schemas.BundleIdCapability(_type: .bundleIdCapabilities, id: "44N3N8QMR4_SOMETHING_NEW")
+    let foreign = Components.Schemas.BundleIdCapability(_type: .bundleIdCapabilities, id: "OTHERAPPID_APP_GROUPS")
+
+    #expect(DeveloperServicesAddAppOperation.capabilityType(of: push, appID: appID) == .init(.pushNotifications))
+    #expect(DeveloperServicesAddAppOperation.capabilityType(of: unknown, appID: appID) == .init(value1: nil, value2: "SOMETHING_NEW"))
+    #expect(DeveloperServicesAddAppOperation.capabilityType(of: foreign, appID: appID) == nil)
+}
+
+@Test func aCapabilityTypeAppleFillsInBothWaysEqualsTheOneXtoolBuilds() {
+    let fromApple = Components.Schemas.CapabilityType(value1: .appGroups, value2: "APP_GROUPS")
+    #expect(fromApple.normalized == Components.Schemas.CapabilityType(.appGroups))
 }
