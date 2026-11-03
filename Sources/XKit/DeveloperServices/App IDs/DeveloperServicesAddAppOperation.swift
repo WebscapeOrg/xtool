@@ -102,7 +102,7 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                     }
                     continue
                 }
-                if wantedSettings != (attributes.settings ?? []) {
+                if !Self.settings(attributes.settings, cover: wantedSettings) {
                     print("Updating \(typ.logName) on \(newBundleID): Apple has \(attributes.settings ?? []), the app wants \(wantedSettings)")
                     _ = try await context.developerAPIClient.bundleIdCapabilitiesUpdateInstance(
                         path: .init(id: cap.id),
@@ -357,6 +357,36 @@ extension DeveloperServicesAddAppOperation {
         guard capability.id.hasPrefix(prefix) else { return nil }
         let name = String(capability.id.dropFirst(prefix.count))
         return Components.Schemas.CapabilityType(value1: .init(rawValue: name), value2: nil).normalized(or: name)
+    }
+}
+
+extension DeveloperServicesAddAppOperation {
+    /// Whether the settings Apple holds for a capability already give the app what it asks for.
+    /// Invariant: Apple returns a setting in a fuller shape than xtool sends (names, descriptions,
+    /// every option with its flags, and keys filled in both halves of their anyOf), so comparing
+    /// them with `==` found a difference on every build and sent the setting again each time,
+    /// which marks the App ID's profile invalid. A wanted option is covered when Apple's setting
+    /// with the same key lists it and does not mark it disabled. When Apple returns no setting with
+    /// that key, nothing is known to differ, so nothing is sent, as for a capability Apple returns
+    /// without attributes.
+    static func settings(
+        _ held: [Components.Schemas.CapabilitySetting]?,
+        cover wanted: [Components.Schemas.CapabilitySetting]
+    ) -> Bool {
+        wanted.allSatisfy { want in
+            guard let have = (held ?? []).first(where: { name(of: $0.key) == name(of: want.key) }) else { return true }
+            return (want.options ?? []).allSatisfy { option in
+                (have.options ?? []).contains { name(of: $0.key) == name(of: option.key) && $0.enabled != false }
+            }
+        }
+    }
+
+    private static func name(of key: Components.Schemas.CapabilitySetting.KeyPayload?) -> String? {
+        key?.value1?.rawValue ?? key?.value2
+    }
+
+    private static func name(of key: Components.Schemas.CapabilityOption.KeyPayload?) -> String? {
+        key?.value1?.rawValue ?? key?.value2
     }
 }
 

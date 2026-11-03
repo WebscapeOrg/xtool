@@ -97,3 +97,64 @@ private func profileEntitlements(containers: [String]) throws -> [String: Any] {
     #expect(!ProfileReuse.grants(granted[ICloudContainerIdentifiersEntitlement.identifier], ["iCloud.XTL-\(team).net.anotherdave.other"]))
     #expect(ProfileReuse.grants(granted["com.apple.developer.icloud-container-environment"], "Development"))
 }
+
+private func appleSettings(_ json: String) throws -> [Components.Schemas.CapabilitySetting] {
+    try JSONDecoder().decode([Components.Schemas.CapabilitySetting].self, from: Data(json.utf8))
+}
+
+private let iCloudWithCloudKit = ICloudContainerIdentifiersEntitlement(rawValue: []).capability.settings ?? []
+
+/// Apple returns settings in a fuller shape than xtool sends, so they are compared by what they
+/// grant: comparing with `==` sent ICLOUD's setting again on every build and made a new profile.
+@Test func iCloudsSettingAsAppleReturnsItIsNotSentAgain() throws {
+    let echoed = try appleSettings("""
+    [{"key":"ICLOUD_VERSION","options":[{"key":"XCODE_6"}]}]
+    """)
+    #expect(echoed != iCloudWithCloudKit, "the decoded keys fill both halves, so == alone would differ")
+    #expect(DeveloperServicesAddAppOperation.settings(echoed, cover: iCloudWithCloudKit))
+
+    let full = try appleSettings("""
+    [{"key":"ICLOUD_VERSION","name":"iCloud","description":"Choose the iCloud version","enabledByDefault":true,"visible":true,
+      "options":[{"key":"XCODE_5","name":"Xcode 5","enabled":false},{"key":"XCODE_6","name":"Include CloudKit support","enabled":true,"supportsWildcard":false}]}]
+    """)
+    #expect(DeveloperServicesAddAppOperation.settings(full, cover: iCloudWithCloudKit))
+    #expect(DeveloperServicesAddAppOperation.settings(nil, cover: iCloudWithCloudKit), "no setting returned: nothing is known to differ")
+    #expect(DeveloperServicesAddAppOperation.settings([], cover: iCloudWithCloudKit))
+    #expect(DeveloperServicesAddAppOperation.settings(try appleSettings("""
+    [{"key":"DATA_PROTECTION_PERMISSION_LEVEL","options":[{"key":"COMPLETE_PROTECTION"}]}]
+    """), cover: iCloudWithCloudKit))
+}
+
+@Test func iCloudWithoutCloudKitIsUpdated() throws {
+    let documentsOnly = try appleSettings("""
+    [{"key":"ICLOUD_VERSION","options":[{"key":"XCODE_5","enabled":true},{"key":"XCODE_6","enabled":false}]}]
+    """)
+    #expect(!DeveloperServicesAddAppOperation.settings(documentsOnly, cover: iCloudWithCloudKit))
+    let missing = try appleSettings("""
+    [{"key":"ICLOUD_VERSION","options":[{"key":"XCODE_5"}]}]
+    """)
+    #expect(!DeveloperServicesAddAppOperation.settings(missing, cover: iCloudWithCloudKit))
+}
+
+@Test func anotherDataProtectionLevelIsUpdated() throws {
+    let wanted = DataProtectionEntitlement.complete.capability.settings ?? []
+    let held = try appleSettings("""
+    [{"key":"DATA_PROTECTION_PERMISSION_LEVEL","options":[{"key":"PROTECTED_UNLESS_OPEN"}]}]
+    """)
+    #expect(!DeveloperServicesAddAppOperation.settings(held, cover: wanted))
+    let same = try appleSettings("""
+    [{"key":"DATA_PROTECTION_PERMISSION_LEVEL","options":[{"key":"COMPLETE_PROTECTION","enabled":true}]}]
+    """)
+    #expect(DeveloperServicesAddAppOperation.settings(same, cover: wanted))
+}
+
+/// Apple never deletes a container, so only `iCloud.` and a reverse-DNS name is ever created.
+@Test func onlyWellFormedContainerIdentifiersAreCreated() {
+    for good in ["iCloud.net.anotherdave.magpie", "iCloud.XTL-\(team).net.anotherdave.magpie"] {
+        #expect(ProvisioningIdentifiers.isContainerID(.init(rawValue: good)), "\(good)")
+    }
+    for bad in ["icloud.net.anotherdave.magpie", "iCloud.$(CFBundleIdentifier)", "iCloud.magpie", "iCloud.net..magpie",
+                "iCloud.net.anotherdave.magpie.", "net.anotherdave.magpie", "iCloud.net.another dave.magpie", "iCloud.net.anotherdavé.magpie"] {
+        #expect(!ProvisioningIdentifiers.isContainerID(.init(rawValue: bad)), "\(bad)")
+    }
+}
