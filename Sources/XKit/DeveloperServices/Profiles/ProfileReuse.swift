@@ -53,6 +53,42 @@ public enum ProfileReuse: Equatable, Sendable {
 
     public struct UnreadableEntitlements: Error {}
 
+    /// The app groups an App ID already has, or why they cannot be told.
+    public enum AssignedGroups: Equatable, Sendable {
+        case known(Set<String>)
+        case unknown(String)
+    }
+
+    /// One of the App ID's profiles as Apple lists it: its state, and the entitlements it
+    /// grants (nil when its content could not be read).
+    public struct ListedProfile {
+        public var state: String?
+        public var entitlements: [String: Any]?
+
+        public init(state: String?, entitlements: [String: Any]?) {
+            self.state = state
+            self.entitlements = entitlements
+        }
+    }
+
+    /// Reads the App ID's groups from its one active profile. Apple marked an App ID's
+    /// profiles invalid when its groups were assigned again, even to the same groups
+    /// (Magpie's two-build test of 3 November 2026), so a profile still listed as active was
+    /// made from the groups the App ID has now. With no profile, several, or one that is not
+    /// active or cannot be read, the groups are unknown and are assigned again.
+    public static func assignedGroups(_ profiles: [ListedProfile]) -> AssignedGroups {
+        guard profiles.count == 1 else {
+            return .unknown("it has \(profiles.count) profiles, not one")
+        }
+        guard profiles[0].state == "ACTIVE" else {
+            return .unknown("Apple lists its profile as \(profiles[0].state ?? "having no state")")
+        }
+        guard let granted = profiles[0].entitlements else {
+            return .unknown("its profile could not be read")
+        }
+        return .known(Set(granted["com.apple.security.application-groups"] as? [String] ?? []))
+    }
+
     public static func decide(_ profile: Profile, for build: Build, now: Date = Date()) -> ProfileReuse {
         guard profile.state == "ACTIVE" else {
             return .replace("Apple lists it as \(profile.state ?? "having no state")")
