@@ -14,6 +14,7 @@ public struct DeveloperServicesAssignAppGroupsOperation: DeveloperServicesOperat
     public let context: SigningContext
     public let groupIDs: [DeveloperServicesAppGroup.GroupID]
     public let appID: Components.Schemas.BundleId
+    public let assignedGroupIDs: Set<DeveloperServicesAppGroup.GroupID>?
     public let xcodeAuthData: XcodeAuthData
 
     private let client: DeveloperServicesClient
@@ -21,11 +22,13 @@ public struct DeveloperServicesAssignAppGroupsOperation: DeveloperServicesOperat
     public init?(
         context: SigningContext,
         groupIDs: [DeveloperServicesAppGroup.GroupID],
-        appID: Components.Schemas.BundleId
+        appID: Components.Schemas.BundleId,
+        assignedGroupIDs: Set<DeveloperServicesAppGroup.GroupID>? = nil
     ) {
         self.context = context
         self.groupIDs = groupIDs
         self.appID = appID
+        self.assignedGroupIDs = assignedGroupIDs
 
         guard case .xcode(let authData) = context.auth else { return nil }
         self.xcodeAuthData = authData
@@ -75,7 +78,8 @@ public struct DeveloperServicesAssignAppGroupsOperation: DeveloperServicesOperat
         .sorted { $0.0 < $1.0 }
         .map(\.1)
 
-        if !groups.isEmpty {
+        if !groups.isEmpty && Set(groups.map(\.groupID)) != assignedGroupIDs {
+            print("Assigning \(groups.count) app groups to \(appID.attributes?.identifier ?? appID.id)")
             _ = try await client.send(
                 DeveloperServicesAssignAppGroupRequest(
                     platform: .iOS,

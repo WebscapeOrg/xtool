@@ -80,20 +80,24 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
             .ok.body.json.data
         let existingCapabilities = [Components.Schemas.CapabilityType: Components.Schemas.BundleIdCapability](
             existingCapabilitiesList.compactMap { cap in
-                (cap.attributes?.capabilityType).map { ($0, cap) }
+                Self.capabilityType(of: cap, appID: appID).map { ($0, cap) }
             },
             uniquingKeysWith: { $1 }
         )
 
         let wantedCapabilitiesList = try entitlements.entitlements().compactMap(\.anyCapability)
         let wantedCapabilities = [Components.Schemas.CapabilityType: [Components.Schemas.CapabilitySetting]](
-            wantedCapabilitiesList.map { ($0.capabilityType, $0.settings ?? []) },
+            wantedCapabilitiesList.map { ($0.capabilityType.normalized, $0.settings ?? []) },
             uniquingKeysWith: { $1 }
         )
 
         for (typ, cap) in existingCapabilities {
             if let wantedSettings = wantedCapabilities[typ] {
-                if wantedSettings != (cap.attributes?.settings ?? []) {
+                // Invariant: without attributes the settings Apple holds are unknown, so they
+                // are left as they are; sending them again would invalidate every profile.
+                guard let attributes = cap.attributes else { continue }
+                if wantedSettings != (attributes.settings ?? []) {
+                    print("Updating \(typ.logName) on \(newBundleID): Apple has \(attributes.settings ?? []), the app wants \(wantedSettings)")
                     _ = try await context.developerAPIClient.bundleIdCapabilitiesUpdateInstance(
                         path: .init(id: cap.id),
                         body: .json(
@@ -115,6 +119,7 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                 // DeveloperServices doesn't allow deleting these capabilities
                 let requiredCapabilities: Set<Components.Schemas.CapabilityType.Value1Payload> = [.inAppPurchase]
                 if let capType = cap.attributes?.capabilityType?.value1, !requiredCapabilities.contains(capType) {
+                    print("Removing \(typ.logName) from \(newBundleID)")
                     _ = try await context.developerAPIClient
                         .bundleIdCapabilitiesDeleteInstance(path: .init(id: cap.id))
                         .noContent
@@ -123,6 +128,7 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
         }
         for (typ, settings) in wantedCapabilities {
             guard existingCapabilities[typ] == nil else { continue }
+            print("Adding \(typ.logName) to \(newBundleID)")
             _ = try await context.developerAPIClient.bundleIdCapabilitiesCreateInstance(
                 body: .json(.init(data: .init(
                     _type: .bundleIdCapabilities,
@@ -211,7 +217,8 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
             if let operation = DeveloperServicesAssignAppGroupsOperation(
                 context: self.context,
                 groupIDs: groups,
-                appID: appID
+                appID: appID,
+                assignedGroupIDs: await assignedGroupIDs(appID: appID)
             ) {
                 let newGroups = try await operation.perform()
                 entitlementsArray[groupsIdx] = AppGroupEntitlement(rawValue: newGroups)
@@ -231,6 +238,26 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
             entitlements: entitlements,
             mobileprovision: mobileprovision
         )
+    }
+
+    /// The app groups the App ID already has, read from its one active profile: Apple marks
+    /// an App ID's profiles invalid when its groups are assigned again, even to the same
+    /// groups (Magpie's two-build test of 3 November 2026), so the groups are assigned only
+    /// when they differ. A profile is active only while the App ID still has the groups it
+    /// was made with, so its groups are the App ID's. Nil when that cannot be read.
+    private func assignedGroupIDs(appID: Components.Schemas.BundleId) async -> Set<DeveloperServicesAppGroup.GroupID>? {
+        guard let profiles = try? await context.developerAPIClient.bundleIdsProfilesGetToManyRelated(
+            path: .init(id: appID.id),
+            query: .init(fields_lbrack_profiles_rbrack_: [.profileState, .profileContent])
+        ).ok.body.json.data,
+            profiles.count == 1,
+            profiles[0].attributes?.profileState?.value1 == .active,
+            let content = profiles[0].attributes?.profileContent.flatMap({ Data(base64Encoded: $0) }),
+            let digest = try? Mobileprovision(data: content).digest(),
+            let granted = try? ProfileReuse.dictionary(digest.entitlements),
+            let groups = granted["com.apple.security.application-groups"] as? [String]
+            else { return nil }
+        return Set(groups.map(DeveloperServicesAppGroup.GroupID.init(rawValue:)))
     }
 
     /// Registers the app + its extensions, returning the profile and entitlements of each
@@ -259,4 +286,34 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
         }
     }
 
+}
+
+extension DeveloperServicesAddAppOperation {
+    /// Invariant: Apple's Xcode API returns an App ID's capabilities without attributes,
+    /// each with an id of the form "<App ID id>_<CAPABILITY_TYPE>" (seen 3 November 2026),
+    /// so the type is read from the id when the attributes are missing. Without this every
+    /// capability looked new on every build and was added again, and Apple then marked the
+    /// App ID's profiles invalid, so no profile could ever be reused.
+    static func capabilityType(
+        of capability: Components.Schemas.BundleIdCapability,
+        appID: Components.Schemas.BundleId
+    ) -> Components.Schemas.CapabilityType? {
+        if let type = capability.attributes?.capabilityType { return type.normalized }
+        let prefix = "\(appID.id)_"
+        guard capability.id.hasPrefix(prefix) else { return nil }
+        let name = String(capability.id.dropFirst(prefix.count))
+        return Components.Schemas.CapabilityType(value1: .init(rawValue: name), value2: nil).normalized(or: name)
+    }
+}
+
+extension Components.Schemas.CapabilityType {
+    fileprivate var logName: String { value1?.rawValue ?? value2 ?? "a capability" }
+
+    /// One form per type, so a type Apple sends (which may fill in both halves of the
+    /// anyOf) and one xtool builds compare equal.
+    var normalized: Self { normalized(or: value2 ?? "") }
+
+    func normalized(or name: String) -> Self {
+        value1.map { Self(value1: $0, value2: nil) } ?? Self(value1: nil, value2: name)
+    }
 }
