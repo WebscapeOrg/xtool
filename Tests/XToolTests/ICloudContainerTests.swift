@@ -128,6 +128,18 @@ private let iCloudWithCloudKit = ICloudContainerIdentifiersEntitlement(rawValue:
     """), cover: iCloudWithCloudKit))
 }
 
+/// The ICLOUD setting exactly as Apple returned it for Magpie's App ID on 3 November 2026, the
+/// build after the container was made: XCODE_6 with its entitlements and no `enabled` flag.
+@Test func iCloudsSettingAsAppleReturnedItForMagpieIsNotSentAgain() throws {
+    let returned = try appleSettings("""
+    [{"key":"ICLOUD_VERSION","options":[{"key":"XCODE_6","entitlements":[{"key":"ICLOUD_CONTAINER_DEV_CONTAINER_IDENTIFIER",
+      "name":"ICloud Container Development Container Identifiers","description":"ICloud Container Development Container Identifiers Entitlement",
+      "valueType":"ARRAY","relevance":"profile-entitlement","profileKey":"com.apple.developer.icloud-container-development-container-identifiers",
+      "supportsWildcard":true,"isRequiredInPlist":false,"values":[]}]}]}]
+    """)
+    #expect(DeveloperServicesAddAppOperation.settings(returned, cover: iCloudWithCloudKit))
+}
+
 @Test func iCloudWithoutCloudKitIsUpdated() throws {
     let documentsOnly = try appleSettings("""
     [{"key":"ICLOUD_VERSION","options":[{"key":"XCODE_5","enabled":true},{"key":"XCODE_6","enabled":false}]}]
