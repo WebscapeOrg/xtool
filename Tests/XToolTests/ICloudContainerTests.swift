@@ -120,6 +120,9 @@ private let iCloudWithCloudKit = ICloudContainerIdentifiersEntitlement(rawValue:
     #expect(DeveloperServicesAddAppOperation.settings(full, cover: iCloudWithCloudKit))
     #expect(DeveloperServicesAddAppOperation.settings(nil, cover: iCloudWithCloudKit), "no setting returned: nothing is known to differ")
     #expect(DeveloperServicesAddAppOperation.settings([], cover: iCloudWithCloudKit))
+    for keyOnly in [#"[{"key":"ICLOUD_VERSION"}]"#, #"[{"key":"ICLOUD_VERSION","options":[]}]"#, #"[{"key":"ICLOUD_VERSION","options":null}]"#] {
+        #expect(DeveloperServicesAddAppOperation.settings(try appleSettings(keyOnly), cover: iCloudWithCloudKit), "the key without options: nothing is known to differ")
+    }
     #expect(DeveloperServicesAddAppOperation.settings(try appleSettings("""
     [{"key":"DATA_PROTECTION_PERMISSION_LEVEL","options":[{"key":"COMPLETE_PROTECTION"}]}]
     """), cover: iCloudWithCloudKit))
