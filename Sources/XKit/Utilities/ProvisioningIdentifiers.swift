@@ -58,6 +58,18 @@ extension ProvisioningIdentifiers {
         .init(rawValue: "\(Self.cloudContainerPrefix)\(identifier(fromSanitized: sanitized, context: context))")
     }
 
+    /// Whether an identifier is `iCloud.` followed by a reverse-DNS name, the only form xtool
+    /// creates a container for. Apple never deletes a container, so a misspelt prefix or a build
+    /// variable left unexpanded must not become one.
+    static func isContainerID(_ containerID: DeveloperServicesCloudContainer.Identifier) -> Bool {
+        let id = containerID.rawValue
+        guard id.hasPrefix(Self.cloudContainerPrefix) else { return false }
+        let labels = id.dropFirst(Self.cloudContainerPrefix.count).split(separator: ".", omittingEmptySubsequences: false)
+        return labels.count >= 2 && labels.allSatisfy { label in
+            !label.isEmpty && label.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
+        }
+    }
+
     static func containerName(fromSanitized sanitized: String) -> String {
         "\(Self.namePrefix)iCloud \(safeify(identifier: sanitized))"
     }
