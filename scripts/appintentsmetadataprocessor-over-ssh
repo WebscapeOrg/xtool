@@ -8,9 +8,9 @@ declares App Intents. The Darwin SDK on Linux has no such tool, so point that va
     XTOOL_MAC_HOST=<ssh name of a Mac with Xcode>
 
 What it does, once per call:
-  1. Asks the Mac for its Xcode (XTOOL_MAC_DEVELOPER_DIR if set here, else the Mac's own DEVELOPER_DIR, else
-     /Applications/Xcode-beta.app/Contents/Developer), that Xcode's iOS or simulator SDK (chosen by whether
-     --target-triple names the simulator), its toolchain, its build version and its appintentsmetadataprocessor.
+  1. Asks the Mac for its Xcode (XTOOL_MAC_DEVELOPER_DIR if set here, else the Mac's own DEVELOPER_DIR, else the
+     one `xcode-select -p` names), that Xcode's iOS or simulator SDK (chosen by whether --target-triple names the
+     simulator), its toolchain, its build version and its appintentsmetadataprocessor.
   2. Copies the inputs (the file lists, every file they name, the const values, the sources they point to, and the
      output bundle's Info.plist) into a fresh `mktemp -d /tmp/xtool-appintents.XXXXXX` on the Mac, under the same
      absolute paths, and rewrites the paths inside the file lists and the const values to match.
@@ -32,7 +32,7 @@ import sys
 import tempfile
 
 PROG = "appintentsmetadataprocessor-over-ssh"
-DEFAULT_DEVELOPER_DIR = "/Applications/Xcode-beta.app/Contents/Developer"
+MAC_SELECTED_XCODE = "$(xcode-select -p)"
 REMOTE_TEMPLATE = "/tmp/xtool-appintents.XXXXXX"
 REMOTE_PATTERN = re.compile(r"^/tmp/xtool-appintents\.[A-Za-z0-9]{6}$")
 MARKER = "xtool-appintents-mac-tools"
@@ -156,7 +156,7 @@ def mac_tools(host, triple):
     """The Mac's developer dir, SDK root, processor and Xcode build version, and a fresh staging folder there."""
     sdk = "iphonesimulator" if "simulator" in (triple or "") else "iphoneos"
     local_choice = os.environ.get("XTOOL_MAC_DEVELOPER_DIR")
-    developer_dir = shlex.quote(local_choice) if local_choice else f'"${{DEVELOPER_DIR:-{DEFAULT_DEVELOPER_DIR}}}"'
+    developer_dir = shlex.quote(local_choice) if local_choice else f'"${{DEVELOPER_DIR:-{MAC_SELECTED_XCODE}}}"'
     script = f"""set -e
 export DEVELOPER_DIR={developer_dir}
 sdk_root=$(xcrun --sdk {sdk} --show-sdk-path)
