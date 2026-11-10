@@ -1,5 +1,5 @@
 {
-  "originHash" : "a4bc17b5590d4f7241ad6e7ac4985c5c76df8a5376e7022c2e24751f498ee975",
+  "originHash" : "302c1463e9610467008d974ca099e65704bfa0c988b88c1061d2602cdc011a40",
   "pins" : [
     {
       "identity" : "aexml",
@@ -492,7 +492,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/WebscapeOrg/zsign",
       "state" : {
-        "revision" : "95c39faa4eeb7c0c85673155ef570276d5249770"
+        "revision" : "c08d3620584366b08a9a4efdf2739807ec91c0a5"
       }
     }
   ],
