@@ -18,7 +18,16 @@ public struct XcodePacker {
         let xtoolDir: Path = "xtool"
 
         let projectDir: Path = xtoolDir + ".xtool-tmp"
-        try? xtoolDir.delete()
+        // Invariant: everything in xtool/ but the build lock, which this process holds (BuildLock); deleting its
+        // file would let a second build take a new lock and delete .xtool-tmp under this one. Anything else at
+        // that path, such as a file or a link, is removed as before.
+        if xtoolDir.isDirectory && !xtoolDir.isSymlink {
+            for child in (try? xtoolDir.children()) ?? [] where child.lastComponent != BuildLock.fileName {
+                try? child.delete()
+            }
+        } else {
+            try? xtoolDir.delete()
+        }
         try projectDir.mkpath()
 
         let fromProjectToRoot = try Path(".").relativePath(from: projectDir)

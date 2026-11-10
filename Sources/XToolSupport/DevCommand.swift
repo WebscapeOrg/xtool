@@ -36,6 +36,10 @@ struct PackOperation {
             throw Console.Error("Could not find Package.swift in this directory.")
         }
 
+        // Before planning and building, which write into xtool/, and held until xtool exits, so the
+        // signing and installing that follow are covered too.
+        try await BuildLock.acquireForThisProcess()
+
         try await EnsureSDKOperation(quiet: true).run()
 
         print("Planning...")
