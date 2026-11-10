@@ -154,6 +154,25 @@ struct BuildLockTests {
         #expect(warnings.recorded.isEmpty)
     }
 
+    @Test func aBuildWaitingWhenTheWholeXtoolFolderIsRemovedTakesALockInANewOne() async throws {
+        let folder = try Folder()
+        let warnings = Warnings()
+        let first = try #require(try await BuildLock.lock(in: folder.url, warn: warnings.record) { _ in })
+        let waits = Waits()
+        let url = folder.url
+        let waiter = Task.detached {
+            try await BuildLock.lock(in: url, pollNanoseconds: 10_000_000, warn: warnings.record) { waits.record($0) }
+        }
+        try await waitUntil { !waits.recorded.isEmpty }
+        try FileManager.default.removeItem(at: folder.url)
+        close(first)
+        let descriptor = try #require(try await waiter.value)
+        #expect(BuildLock.isStillAtPath(descriptor, folder.lockPath))
+        #expect(try folder.takenByAnother())
+        close(descriptor)
+        #expect(warnings.recorded.isEmpty)
+    }
+
     @Test func theWaitingMessageNamesNoPidForAHolderThatHasExited() throws {
         let folder = try Folder()
         try FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)

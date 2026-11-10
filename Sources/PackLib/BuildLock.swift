@@ -48,14 +48,15 @@ public enum BuildLock {
     ) async throws -> Int32? {
         let path = xtoolDirectory.appendingPathComponent(fileName).path
         let withoutIt = "so this build runs without the lock that stops a second build in this folder from deleting its files"
-        do {
-            try FileManager.default.createDirectory(at: xtoolDirectory, withIntermediateDirectories: true)
-        } catch {
-            warn("warning: Could not create \(xtoolDirectory.path) (\(error)), \(withoutIt).")
-            return nil
-        }
         var told = false
         while true {
+            // Each time round, since the folder may have gone with the lock file (git clean -fdx) while this build waited.
+            do {
+                try FileManager.default.createDirectory(at: xtoolDirectory, withIntermediateDirectories: true)
+            } catch {
+                warn("warning: Could not create \(xtoolDirectory.path) (\(error)), \(withoutIt).")
+                return nil
+            }
             // Invariant: close-on-exec, so swift build and the other tools xtool starts do not inherit the lock.
             let descriptor = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
             guard descriptor >= 0 else {
