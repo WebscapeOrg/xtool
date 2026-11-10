@@ -39,6 +39,7 @@ struct PackOperation {
         // Before planning and building, which write into xtool/, and held until xtool exits, so the
         // signing and installing that follow are covered too.
         try await BuildLock.acquireForThisProcess()
+        BuildTermination.shared.buildStarting()
 
         try await EnsureSDKOperation(quiet: true).run()
 
