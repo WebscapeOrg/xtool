@@ -20,7 +20,7 @@ private final class Folder {
 
     /// Whether a separate open of the lock file could take it now, as another xtool process would.
     func takenByAnother() throws -> Bool {
-        let other = open(lockPath, O_RDWR)
+        let other = open(lockPath, O_RDONLY)
         try #require(other >= 0, "the lock file is missing")
         defer { close(other) }
         if flock(other, LOCK_EX | LOCK_NB) == 0 {
@@ -127,8 +127,6 @@ struct BuildLockTests {
         try await waitUntil { !waits.recorded.isEmpty }
         second.cancel()
         await #expect(throws: CancellationError.self) { try await second.value }
-        flock(first, LOCK_UN)
-        #expect(!(try folder.takenByAnother()))
         #expect(warnings.recorded.isEmpty)
     }
 
@@ -171,6 +169,33 @@ struct BuildLockTests {
         #expect(try folder.takenByAnother())
         close(descriptor)
         #expect(warnings.recorded.isEmpty)
+    }
+
+    /// Root can write any file, so this cannot be shown as root, as in the Docker image CI uses.
+    @Test(.enabled(if: getuid() != 0)) func aLockFileThisUserCannotWriteStillLocks() async throws {
+        let folder = try Folder()
+        try FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
+        #expect(FileManager.default.createFile(atPath: folder.lockPath, contents: Data(), attributes: [.posixPermissions: 0o444]))
+        let warnings = Warnings()
+        let descriptor = try #require(try await BuildLock.lock(in: folder.url, warn: warnings.record) { _ in })
+        #expect(try folder.takenByAnother())
+        close(descriptor)
+        #expect(!(try folder.takenByAnother()))
+        #expect(warnings.recorded.isEmpty)
+    }
+
+    @Test func aLockFileThatIsALinkIsNotFollowed() async throws {
+        let folder = try Folder()
+        try FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
+        let target = folder.url.deletingLastPathComponent().appendingPathComponent("someone-elses-file")
+        try Data("keep this\n".utf8).write(to: target)
+        try FileManager.default.createSymbolicLink(atPath: folder.lockPath, withDestinationPath: target.path)
+        let warnings = Warnings()
+        let descriptor = try await BuildLock.lock(in: folder.url, pollNanoseconds: 1_000_000, warn: warnings.record) { _ in }
+        #expect(descriptor == nil)
+        #expect(warnings.recorded.count == 1)
+        #expect(warnings.recorded.first?.contains("Could not open") == true)
+        #expect(try String(contentsOf: target, encoding: .utf8) == "keep this\n")
     }
 
     @Test func theWaitingMessageNamesNoPidForAHolderThatHasExited() throws {

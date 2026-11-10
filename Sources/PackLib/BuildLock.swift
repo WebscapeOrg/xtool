@@ -49,6 +49,7 @@ public enum BuildLock {
         let path = xtoolDirectory.appendingPathComponent(fileName).path
         let withoutIt = "so this build runs without the lock that stops a second build in this folder from deleting its files"
         var told = false
+        var replaced = 0
         while true {
             // Each time round, since the folder may have gone with the lock file (git clean -fdx) while this build waited.
             do {
@@ -58,14 +59,21 @@ public enum BuildLock {
                 return nil
             }
             // Invariant: close-on-exec, so swift build and the other tools xtool starts do not inherit the lock.
-            let descriptor = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+            // Invariant: no-follow, so a lock file that is a link, as a repository could ship one, never leads the
+            // pid write below to empty the file it points to.
+            var descriptor = open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o644)
+            var reason = errno
+            if descriptor < 0 && reason == EACCES {
+                // A lock file this user cannot write, as in a folder shared with another user, still locks when
+                // opened to read; only the pid is not written.
+                descriptor = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+            }
             guard descriptor >= 0 else {
-                let reason = errno
                 warn("warning: Could not open \(path) (\(describe(reason))), \(withoutIt).")
                 return nil
             }
             while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
-                let reason = errno
+                reason = errno
                 if reason == EINTR { continue }
                 guard reason == EWOULDBLOCK else {
                     close(descriptor)
@@ -87,6 +95,13 @@ public enum BuildLock {
             // build waited, the lock it now has is on a file no other build will open, so it starts again.
             guard isStillAtPath(descriptor, path) else {
                 close(descriptor)
+                replaced += 1
+                // Replaced once or twice by a build or a clean is ordinary; forty times in a row is not.
+                guard replaced < 40 else {
+                    warn("warning: \(path) kept changing while this build waited for it, \(withoutIt).")
+                    return nil
+                }
+                try await Task.sleep(nanoseconds: pollNanoseconds)
                 continue
             }
             let pid = Array("\(getpid())\n".utf8)
@@ -100,7 +115,7 @@ public enum BuildLock {
     static func isStillAtPath(_ descriptor: Int32, _ path: String) -> Bool {
         var opened = stat()
         var atPath = stat()
-        guard fstat(descriptor, &opened) == 0, stat(path, &atPath) == 0 else { return false }
+        guard fstat(descriptor, &opened) == 0, lstat(path, &atPath) == 0 else { return false }
         return opened.st_dev == atPath.st_dev && opened.st_ino == atPath.st_ino
     }
 
