@@ -13,6 +13,8 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
 
     public enum Error: LocalizedError {
         case invalidApp(URL)
+        case invalidProfileData
+        case conflictingProfileAssignments(String)
 
         public var errorDescription: String? {
             switch self {
@@ -24,6 +26,10 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                         ), $0
                     )
                 }
+            case .invalidProfileData:
+                return "Apple returned an incomplete provisioning profile"
+            case .conflictingProfileAssignments(let what):
+                return "Apple's active profiles disagree about the app's \(what); not assigning them again"
             }
         }
     }
@@ -222,7 +228,7 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
             entitlementsArray.contains(where: { $0 is AppGroupEntitlement || $0 is ICloudContainerIdentifiersEntitlement }) {
             // Read before anything is assigned: assigning groups marks the profile invalid,
             // while the containers it was made with are still the App ID's.
-            let profiles = await listedProfiles(appID: appID)
+            let profiles = try await listedProfiles(appID: appID)
 
             if let groupsIdx = entitlementsArray.firstIndex(where: { $0 is AppGroupEntitlement }),
                 let groupsEntitlement = entitlementsArray[groupsIdx] as? AppGroupEntitlement,
@@ -230,7 +236,7 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                     context: self.context,
                     groupIDs: groupsEntitlement.rawValue,
                     appID: appID,
-                    assignedGroupIDs: assigned(AppGroupEntitlement.identifier, "app groups", in: profiles, appID: appID)
+                    assignedGroupIDs: try assigned(AppGroupEntitlement.identifier, "app groups", in: profiles, appID: appID)
                         .map { Set($0.map(DeveloperServicesAppGroup.GroupID.init(rawValue:))) }
                 ) {
                 let newGroups = try await operation.perform()
@@ -243,7 +249,7 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                     context: self.context,
                     containerIDs: containersEntitlement.rawValue,
                     appID: appID,
-                    assignedContainerIDs: assigned(
+                    assignedContainerIDs: try assigned(
                         ICloudContainerIdentifiersEntitlement.identifier, "iCloud containers", in: profiles, appID: appID
                     ).map { Set($0.map(DeveloperServicesCloudContainer.Identifier.init(rawValue:))) }
                 ) {
@@ -268,23 +274,41 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
         )
     }
 
-    /// The App ID's profiles with their states and entitlements, or why Apple did not return them.
-    private func listedProfiles(appID: Components.Schemas.BundleId) async -> Result<[ProfileReuse.ListedProfile], any Swift.Error> {
-        do {
-            return .success(try await context.developerAPIClient.bundleIdsProfilesGetToManyRelated(
+    /// The App ID's profiles with their states, types and entitlements. An uncertain read
+    /// fails the build rather than permitting a group or container reassignment.
+    private func listedProfiles(appID: Components.Schemas.BundleId) async throws -> [ProfileReuse.ListedProfile] {
+        let profiles = try await DeveloperAPIPages {
+            try await context.developerAPIClient.bundleIdsProfilesGetToManyRelated(
                 path: .init(id: appID.id),
-                query: .init(fields_lbrack_profiles_rbrack_: [.profileState, .profileContent])
-            ).ok.body.json.data.map { profile in
-                ProfileReuse.ListedProfile(
-                    state: profile.attributes?.profileState.map { $0.value1?.rawValue ?? $0.value2 ?? "" },
-                    entitlements: profile.attributes?.profileContent
-                        .flatMap { Data(base64Encoded: $0) }
-                        .flatMap { try? Mobileprovision(data: $0).digest() }
-                        .flatMap { try? ProfileReuse.dictionary($0.entitlements) }
+                query: .init(
+                    fields_lbrack_profiles_rbrack_: [.profileState, .profileType, .profileContent],
+                    limit: 200
                 )
-            })
-        } catch {
-            return .failure(error)
+            ).ok.body.json
+        } next: {
+            $0.links.next
+        }
+        .map(\.data)
+        .reduce(into: [], +=)
+
+        return try profiles.map { profile in
+            guard let rawState = profile.attributes?.profileState,
+                  let state = rawState.value1?.rawValue ?? rawState.value2,
+                  let rawType = profile.attributes?.profileType,
+                  let type = rawType.value1?.rawValue ?? rawType.value2 else {
+                throw Error.invalidProfileData
+            }
+            var granted: [String: Any]?
+            if state == "ACTIVE" {
+                guard let content = profile.attributes?.profileContent,
+                      let data = Data(base64Encoded: content),
+                      let digest = try? Mobileprovision(data: data).digest(),
+                      let entitlements = try? ProfileReuse.dictionary(digest.entitlements) else {
+                    throw Error.invalidProfileData
+                }
+                granted = entitlements
+            }
+            return ProfileReuse.ListedProfile(state: state, type: type, entitlements: granted)
         }
     }
 
@@ -293,24 +317,18 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
     private func assigned(
         _ key: String,
         _ what: String,
-        in profiles: Result<[ProfileReuse.ListedProfile], any Swift.Error>,
+        in profiles: [ProfileReuse.ListedProfile],
         appID: Components.Schemas.BundleId
-    ) -> Set<String>? {
+    ) throws -> Set<String>? {
         let name = appID.attributes?.identifier ?? appID.id
-        let listed: [ProfileReuse.ListedProfile]
-        switch profiles {
-        case .success(let value):
-            listed = value
-        case .failure(let error):
-            print("The \(what) of \(name) are not known: Apple did not return its profiles (\(error.localizedDescription))")
-            return nil
-        }
-        switch ProfileReuse.assigned(key, in: listed) {
+        switch ProfileReuse.assigned(key, in: profiles) {
         case .known(let values):
             return values
         case .unknown(let reason):
             print("The \(what) of \(name) are not known: \(reason)")
             return nil
+        case .conflicting:
+            throw Error.conflictingProfileAssignments(what)
         }
     }
 

@@ -8,6 +8,7 @@
 
 import Foundation
 import DeveloperAPI
+import Dependencies
 
 public struct SigningContext: Sendable {
 
@@ -21,7 +22,8 @@ public struct SigningContext: Sendable {
     public var signer: Signer
 
     public var developerAPIClient: DeveloperAPIClient {
-        DeveloperAPIClient(auth: auth)
+        @Dependency(\.developerAPIClientOverride) var clientOverride
+        return clientOverride ?? DeveloperAPIClient(auth: auth)
     }
 
     public init(
@@ -34,6 +36,18 @@ public struct SigningContext: Sendable {
         self.signer = try signer ?? .first()
     }
 
+}
+
+private enum DeveloperAPIClientOverrideKey: DependencyKey {
+    static let liveValue: DeveloperAPIClient? = nil
+    static let testValue: DeveloperAPIClient? = nil
+}
+
+extension DependencyValues {
+    var developerAPIClientOverride: DeveloperAPIClient? {
+        get { self[DeveloperAPIClientOverrideKey.self] }
+        set { self[DeveloperAPIClientOverrideKey.self] = newValue }
+    }
 }
 
 #if canImport(UIKit)

@@ -85,7 +85,7 @@ private func profileEntitlements(containers: [String]) throws -> [String: Any] {
     #expect(ProfileReuse.assigned(ICloudContainerIdentifiersEntitlement.identifier, in: [before]) == .known([]))
     #expect(
         ProfileReuse.assigned(ICloudContainerIdentifiersEntitlement.identifier, in: [.init(state: "INVALID", entitlements: nil)])
-            == .unknown("Apple lists its profile as INVALID")
+            == .unknown("it has no readable active profile")
     )
 }
 

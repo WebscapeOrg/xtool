@@ -160,6 +160,7 @@ let package = Package(
                 "XKit",
                 "XToolSupport",
             ],
+            resources: [.copy("Fixtures")],
             swiftSettings: swiftSettings,
         ),
         .target(

@@ -57,25 +57,26 @@ public enum ProfileReuse: Equatable, Sendable {
     public enum AssignedGroups: Equatable, Sendable {
         case known(Set<String>)
         case unknown(String)
+        case conflicting
     }
 
     /// One of the App ID's profiles as Apple lists it: its state, and the entitlements it
     /// grants (nil when its content could not be read).
     public struct ListedProfile {
         public var state: String?
+        public var type: String?
         public var entitlements: [String: Any]?
 
-        public init(state: String?, entitlements: [String: Any]?) {
+        public init(state: String?, type: String? = "IOS_APP_DEVELOPMENT", entitlements: [String: Any]?) {
             self.state = state
+            self.type = type
             self.entitlements = entitlements
         }
     }
 
-    /// Reads the App ID's groups from its one active profile. Apple marked an App ID's
-    /// profiles invalid when its groups were assigned again, even to the same groups
-    /// (Magpie's two-build test of 3 November 2026), so a profile still listed as active was
-    /// made from the groups the App ID has now. With no profile, several, or one that is not
-    /// active or cannot be read, the groups are unknown and are assigned again.
+    /// Reads the App ID's groups from its readable active profiles, whether development or
+    /// distribution. With none, they are unknown, as they are for a newly registered App ID;
+    /// disagreement is not evidence that permits an assignment.
     public static func assignedGroups(_ profiles: [ListedProfile]) -> AssignedGroups {
         assigned(AppGroupEntitlement.identifier, in: profiles)
     }
@@ -83,16 +84,15 @@ public enum ProfileReuse: Equatable, Sendable {
     /// The same reading for any list Apple fills from what is assigned to the App ID: its app
     /// groups, or its iCloud containers under `com.apple.developer.icloud-container-identifiers`.
     public static func assigned(_ key: String, in profiles: [ListedProfile]) -> AssignedGroups {
-        guard profiles.count == 1 else {
-            return .unknown("it has \(profiles.count) profiles, not one")
+        let candidates = profiles.filter { $0.state == "ACTIVE" && $0.entitlements != nil }
+        guard !candidates.isEmpty else {
+            return .unknown("it has no readable active profile")
         }
-        guard profiles[0].state == "ACTIVE" else {
-            return .unknown("Apple lists its profile as \(profiles[0].state ?? "having no state")")
+        let assignments = Set(candidates.map { Set($0.entitlements?[key] as? [String] ?? []) })
+        guard assignments.count == 1, let assigned = assignments.first else {
+            return .conflicting
         }
-        guard let granted = profiles[0].entitlements else {
-            return .unknown("its profile could not be read")
-        }
-        return .known(Set(granted[key] as? [String] ?? []))
+        return .known(assigned)
     }
 
     public static func decide(_ profile: Profile, for build: Build, now: Date = Date()) -> ProfileReuse {

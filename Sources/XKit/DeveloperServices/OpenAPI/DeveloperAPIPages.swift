@@ -49,7 +49,7 @@ public struct DeveloperAPIPages<Page>: AsyncSequence {
         fileprivate var state: State = .initial
 
         public mutating func next() async throws -> Page? {
-            guard !Task.isCancelled else { return nil }
+            guard !Task.isCancelled else { throw CancellationError() }
 
             let cursor: String?
 

@@ -181,14 +181,42 @@ private func build(devices: Set<String> = [phone, ipad], entitlements: [String: 
     #expect(ProfileReuse.assignedGroups([withoutGroups]) == .known([]))
 }
 
-@Test func groupsAreUnknownUnlessThereIsOneReadableActiveProfile() throws {
+@Test func groupsAreReadFromAnActiveDevelopmentProfileAmongOthers() throws {
     let active = ProfileReuse.ListedProfile(state: "ACTIVE", entitlements: try profileEntitlements())
-    #expect(ProfileReuse.assignedGroups([]) == .unknown("it has 0 profiles, not one"))
-    #expect(ProfileReuse.assignedGroups([active, active]) == .unknown("it has 2 profiles, not one"))
+    let distribution = ProfileReuse.ListedProfile(
+        state: "ACTIVE",
+        type: "IOS_APP_ADHOC",
+        entitlements: try profileEntitlements()
+    )
+    #expect(ProfileReuse.assignedGroups([distribution, active]) == .known(["group.XTL-\(team).net.anotherdave.family"]))
+    #expect(ProfileReuse.assignedGroups([active, active]) == .known(["group.XTL-\(team).net.anotherdave.family"]))
+}
+
+@Test func groupsAreReadFromDistributionWhenNoDevelopmentProfileIsReadable() throws {
+    let distribution = ProfileReuse.ListedProfile(
+        state: "ACTIVE",
+        type: "IOS_APP_ADHOC",
+        entitlements: try profileEntitlements()
+    )
+    #expect(ProfileReuse.assignedGroups([distribution]) == .known(["group.XTL-\(team).net.anotherdave.family"]))
+}
+
+@Test func conflictingActiveProfilesDoNotDescribeTheAssignments() throws {
+    let grouped = ProfileReuse.ListedProfile(state: "ACTIVE", entitlements: try profileEntitlements())
+    let ungrouped = ProfileReuse.ListedProfile(
+        state: "ACTIVE",
+        entitlements: try entitlements("<key>get-task-allow</key><true/>")
+    )
+    #expect(ProfileReuse.assignedGroups([grouped, ungrouped]) == .conflicting)
+}
+
+@Test func groupsAreUnknownWithoutAReadableActiveProfile() throws {
+    let unknown = "it has no readable active profile"
+    #expect(ProfileReuse.assignedGroups([]) == .unknown(unknown))
     #expect(
         ProfileReuse.assignedGroups([.init(state: "INVALID", entitlements: try profileEntitlements())])
-            == .unknown("Apple lists its profile as INVALID")
+            == .unknown(unknown)
     )
-    #expect(ProfileReuse.assignedGroups([.init(state: nil, entitlements: nil)]) == .unknown("Apple lists its profile as having no state"))
-    #expect(ProfileReuse.assignedGroups([.init(state: "ACTIVE", entitlements: nil)]) == .unknown("its profile could not be read"))
+    #expect(ProfileReuse.assignedGroups([.init(state: nil, entitlements: nil)]) == .unknown(unknown))
+    #expect(ProfileReuse.assignedGroups([.init(state: "ACTIVE", entitlements: nil)]) == .unknown(unknown))
 }
