@@ -114,7 +114,10 @@ public struct DeveloperServicesFetchProfileOperation: DeveloperServicesOperation
         let response = try await context.developerAPIClient.profilesCreateInstance(
             body: .json(.init(data: .init(
                 _type: .profiles,
-                attributes: .init(name: "XTL profile \(bundleID.id)", profileType: .init(.iosAppDevelopment)),
+                attributes: .init(
+                    name: "XTL profile \(bundleID.id) \(UUID().uuidString)",
+                    profileType: .init(.iosAppDevelopment)
+                ),
                 relationships: .init(
                     bundleId: .init(data: .init(_type: .bundleIds, id: bundleID.id)),
                     devices: .init(data: devices.map { .init(_type: .devices, id: $0.id) }),

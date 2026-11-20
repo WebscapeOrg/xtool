@@ -114,6 +114,20 @@ private func performProfileOperation(fake: ProfileAPIFake) async throws -> Mobil
     #expect(created < deleted)
 }
 
+@Test func aReplacementDoesNotReuseTheNameOfTheProfileStillBeingReplaced() async throws {
+    let fake = try ProfileAPIFake(profileIDs: ["OLD"], states: ["OLD": "INVALID"])
+    _ = try await performProfileOperation(fake: fake)
+    let names = fake.recordedCreatedProfileNames()
+    let name = try #require(names.first)
+    #expect(names.count == 1)
+    #expect(name != "XTL profile BUNDLE")
+    #expect(name.hasPrefix("XTL profile BUNDLE "))
+
+    let anotherFake = try ProfileAPIFake(profileIDs: ["OLD"], states: ["OLD": "INVALID"])
+    _ = try await performProfileOperation(fake: anotherFake)
+    #expect(anotherFake.recordedCreatedProfileNames().first != name)
+}
+
 @Test func anInvalidReplacementDoesNotDeleteTheOldDevelopmentProfile() async throws {
     let fake = try ProfileAPIFake(
         profileIDs: ["OLD"],
@@ -202,6 +216,7 @@ private final class ProfileAPIFake: ClientTransport, @unchecked Sendable {
     let devices: [Device]
     let profileContent: String
     private let calls = LockIsolated<[String]>([])
+    private let createdProfileNames = LockIsolated<[String]>([])
 
     init(
         profileIDs: [String],
@@ -227,6 +242,7 @@ private final class ProfileAPIFake: ClientTransport, @unchecked Sendable {
     }
 
     func recordedCalls() -> [String] { calls.withValue { $0 } }
+    func recordedCreatedProfileNames() -> [String] { createdProfileNames.withValue { $0 } }
 
     func send(
         _ request: HTTPRequest,
@@ -267,12 +283,27 @@ private final class ProfileAPIFake: ClientTransport, @unchecked Sendable {
             let certificate = #"{"type":"certificates","id":"CERT","attributes":{"serialNumber":"5A1B"}}"#
             return json(#"{"data":[\#(certificateFound ? certificate : "")],"links":{"self":"https://example.test/v1/certificates"}}"#)
         case "profiles_createInstance":
+            if let name = try await createdProfileName(from: body) {
+                createdProfileNames.withValue { $0.append(name) }
+            }
             return json(profile(id: "NEW"), status: .created)
         case "profiles_deleteInstance":
             return (HTTPResponse(status: .noContent), nil)
         default:
             throw ProfileFixtureError()
         }
+    }
+
+    private func createdProfileName(from body: HTTPBody?) async throws -> String? {
+        guard let body else { return nil }
+        var data = Data()
+        for try await chunk in body {
+            data.append(contentsOf: chunk)
+        }
+        let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let profile = payload?["data"] as? [String: Any]
+        let attributes = profile?["attributes"] as? [String: Any]
+        return attributes?["name"] as? String
     }
 
     private func profile(id: String) -> String {
