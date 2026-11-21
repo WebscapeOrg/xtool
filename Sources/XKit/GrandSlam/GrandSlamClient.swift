@@ -45,7 +45,12 @@ struct GrandSlamClient: Sendable {
         let resp = try await httpClient.withEphemeralClient {
             try await $0.makeRequest(httpRequest, body: body)
         }
-        return try R.Decoder.decode(data: resp.body)
+        do {
+            return try R.Decoder.decode(data: resp.body)
+        } catch var error as GrandSlamOperationError {
+            error.step = String(describing: R.self)
+            throw error
+        }
     }
 
 }

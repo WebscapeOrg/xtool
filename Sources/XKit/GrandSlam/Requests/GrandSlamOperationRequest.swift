@@ -11,9 +11,12 @@ import Foundation
 struct GrandSlamOperationError: Error, LocalizedError {
     let code: Int
     let message: String
+    var step: String?
 
     var errorDescription: String? {
-        "\(message) (\(code))"
+        let described = "\(message) (\(code))"
+        guard let step else { return described }
+        return "\(described) [GrandSlam step: \(step)]"
     }
 }
 
