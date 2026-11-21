@@ -21,12 +21,12 @@ public struct DeviceInfo: Codable, Sendable {
 
         var clientString: String {
             """
-            <\(modelID)> <macOS;27.0;26A5378j> <com.apple.AuthKit/1 (com.apple.akd/1.0)>
+            <\(modelID)> <Mac OS X;10.12.6;16G29> <com.apple.AuthKit/1 (com.apple.akd/1.0)>
             """
         }
 
         var userAgent: String {
-            "AuthKit/1 (Macintosh; OS X 27.0) (com.apple.dt.Xcode/26.5)"
+            "akd/1.0 CFNetwork/811.5.4 Darwin/16.7.0"
         }
 
         public init(modelID: String) {
