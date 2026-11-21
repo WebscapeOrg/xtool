@@ -84,7 +84,7 @@ public enum DeveloperAPIAuthData: Sendable {
     public var identityID: String {
         switch self {
         case .appStoreConnect(let key):
-            key.issuerID
+            key.teamID ?? key.issuerID
         case .xcode(let data):
             data.teamID.rawValue
         }

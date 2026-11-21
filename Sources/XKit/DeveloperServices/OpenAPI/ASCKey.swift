@@ -5,11 +5,13 @@ public struct ASCKey: Sendable {
     public var id: String
     public var issuerID: String
     public var pem: String
+    public var teamID: String?
 
-    public init(id: String, issuerID: String, pem: String) {
+    public init(id: String, issuerID: String, pem: String, teamID: String? = nil) {
         self.id = id
         self.issuerID = issuerID
         self.pem = pem
+        self.teamID = teamID
     }
 }
 

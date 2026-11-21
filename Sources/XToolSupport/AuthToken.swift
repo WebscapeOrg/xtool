@@ -16,6 +16,7 @@ enum AuthToken: Codable, CustomStringConvertible {
         var id: String
         var issuerID: String
         var pem: String
+        var teamID: String?
     }
 
     case appStoreConnect(AppStoreConnect)
@@ -27,6 +28,7 @@ enum AuthToken: Codable, CustomStringConvertible {
             """
             - ASC key ID: \(data.id)
             - Issuer ID: \(data.issuerID)
+            - Team ID: \(data.teamID ?? "none, so apps are named after the issuer")
             """
         case .xcode(let data):
             """
@@ -85,7 +87,7 @@ extension AuthToken {
     func authData() -> DeveloperAPIAuthData {
         switch self {
         case .appStoreConnect(let data):
-            return .appStoreConnect(.init(id: data.id, issuerID: data.issuerID, pem: data.pem))
+            return .appStoreConnect(.init(id: data.id, issuerID: data.issuerID, pem: data.pem, teamID: data.teamID))
         case .xcode(let data):
             return .xcode(.init(
                 loginToken: DeveloperServicesLoginToken(

@@ -241,6 +241,14 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                 ) {
                 let newGroups = try await operation.perform()
                 entitlementsArray[groupsIdx] = AppGroupEntitlement(rawValue: newGroups)
+            } else if let groupsIdx = entitlementsArray.firstIndex(where: { $0 is AppGroupEntitlement }),
+                let groupsEntitlement = entitlementsArray[groupsIdx] as? AppGroupEntitlement {
+                entitlementsArray[groupsIdx] = AppGroupEntitlement(rawValue: groupsEntitlement.rawValue.map {
+                    ProvisioningIdentifiers.groupID(
+                        fromSanitized: ProvisioningIdentifiers.sanitize(groupID: $0),
+                        context: self.context
+                    )
+                })
             }
 
             if let containersIdx = entitlementsArray.firstIndex(where: { $0 is ICloudContainerIdentifiersEntitlement }),
@@ -255,6 +263,16 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                 ) {
                 let newContainers = try await operation.perform()
                 entitlementsArray[containersIdx] = ICloudContainerIdentifiersEntitlement(rawValue: newContainers)
+            } else if let containersIdx = entitlementsArray.firstIndex(where: { $0 is ICloudContainerIdentifiersEntitlement }),
+                let containersEntitlement = entitlementsArray[containersIdx] as? ICloudContainerIdentifiersEntitlement {
+                entitlementsArray[containersIdx] = ICloudContainerIdentifiersEntitlement(
+                    rawValue: containersEntitlement.rawValue.map {
+                        ProvisioningIdentifiers.containerID(
+                            fromSanitized: ProvisioningIdentifiers.sanitize(containerID: $0),
+                            context: self.context
+                        )
+                    }
+                )
             }
 
             try entitlements.setEntitlements(entitlementsArray)

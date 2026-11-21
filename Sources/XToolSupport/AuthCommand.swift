@@ -72,7 +72,10 @@ struct AuthOperation {
             throw Console.Error("Key is invalid: \(error)")
         }
 
-        return AuthToken.appStoreConnect(.init(id: id, issuerID: issuerID, pem: pem))
+        let teamID = try await Console.prompt("Team ID (to sign as the team a password login used; blank for none): ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return AuthToken.appStoreConnect(.init(id: id, issuerID: issuerID, pem: pem, teamID: teamID.isEmpty ? nil : teamID))
     }
 
     private func logInWithPassword() async throws -> AuthToken {
