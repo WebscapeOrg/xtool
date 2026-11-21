@@ -31,9 +31,7 @@ extension HTTPClientProtocol {
     ) async throws -> (response: HTTPResponse, body: HTTPBody?) {
         let transport = asOpenAPITransport
         let request = request
-        var baseComponents = URLComponents()
-        baseComponents.scheme = request.scheme
-        baseComponents.host = request.authority
+        let baseComponents = URLComponents(string: "\(request.scheme ?? "https")://\(request.authority ?? "")") ?? URLComponents()
         return try await transport.send(
             request,
             body: body,

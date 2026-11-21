@@ -130,6 +130,7 @@ public struct DeveloperAPIXcodeAuthMiddleware: ClientMiddleware {
     ) async throws -> (HTTPResponse, HTTPBody?) {
         var request = request
 
+        let anisetteData = try await anisetteDataProvider.fetchAnisetteData()
         let deviceInfo = try deviceInfoProvider.fetch()
 
         // General
@@ -152,7 +153,6 @@ public struct DeveloperAPIXcodeAuthMiddleware: ClientMiddleware {
         request.headerFields[.init("X-Apple-GS-Token")!] = authData.loginToken.token
 
         // Anisette
-        let anisetteData = try await anisetteDataProvider.fetchAnisetteData()
         for (key, value) in anisetteData.dictionary {
             request.headerFields[.init(key)!] = value
         }

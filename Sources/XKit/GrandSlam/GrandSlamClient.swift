@@ -22,9 +22,8 @@ struct GrandSlamClient: Sendable {
     init() {}
 
     func send<R: GrandSlamRequest>(_ request: R) async throws -> R.Decoder.Value {
-        let deviceInfo = try deviceInfoProvider.fetch()
-
         let anisetteData = try await anisetteDataProvider.fetchAnisetteData()
+        let deviceInfo = try deviceInfoProvider.fetch()
         let url = try await lookupManager.fetchURL(forEndpoint: R.endpoint)
 
         let method = request.method(deviceInfo: deviceInfo, anisetteData: anisetteData)

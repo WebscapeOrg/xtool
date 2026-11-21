@@ -46,7 +46,10 @@ extension DependencyValues {
 
 private struct AnisetteDataProviderDependencyKey: DependencyKey {
     static let testValue: AnisetteDataProvider = UnimplementedAnisetteDataProvider()
-    static let liveValue: AnisetteDataProvider = ADIDataProvider()
+    static let liveValue: AnisetteDataProvider = {
+        if let remote = RemoteAnisette.configured { return RemoteAnisetteDataProvider(remote: remote) }
+        return ADIDataProvider()
+    }()
 }
 
 private struct UnimplementedAnisetteDataProvider: AnisetteDataProvider {

@@ -57,6 +57,19 @@ public struct DeviceInfo: Codable, Sendable {
     static let clientInfoKey = "X-MMe-Client-Info"
     public var clientInfo: ClientInfo { .init(modelID: modelID) }
 
+    public var served: ServedIdentity?
+
+    init(served: ServedIdentity) {
+        self.init(
+            deviceID: served.deviceID,
+            romAddress: "",
+            mlbSerialNumber: "",
+            serialNumber: served.serialNumber,
+            modelID: "MacBookPro13,3"
+        )
+        self.served = served
+    }
+
     public init(
         deviceID: String,
         romAddress: String,
@@ -72,7 +85,14 @@ public struct DeviceInfo: Codable, Sendable {
     }
 
     var dictionary: [String: String] {
-        [
+        if let served {
+            return [
+                Self.clientInfoKey: clientInfo.clientString,
+                Self.deviceIDKey: served.deviceID,
+                Self.serialNumberKey: served.serialNumber
+            ]
+        }
+        return [
             Self.deviceIDKey: deviceID,
             Self.romAddressKey: romAddress,
             Self.mlbSerialNumberKey: mlbSerialNumber,
@@ -105,7 +125,10 @@ public struct DeviceInfoProvider: DependencyKey, Sendable {
     private static let current = Result { try DeviceInfo.fetch() }
 
     public static let testValue = DeviceInfoProvider(fetch: unimplemented())
-    public static let liveValue = DeviceInfoProvider { try current.get() }
+    public static let liveValue = DeviceInfoProvider {
+        if RemoteAnisette.configured != nil { return try RemoteAnisette.deviceInfo() }
+        return try current.get()
+    }
 }
 
 extension DependencyValues {
