@@ -15,6 +15,7 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
         case invalidApp(URL)
         case invalidProfileData
         case conflictingProfileAssignments(String)
+        case notAssignedWithKey(what: String, value: String)
 
         public var errorDescription: String? {
             switch self {
@@ -26,6 +27,8 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                         ), $0
                     )
                 }
+            case .notAssignedWithKey(let what, let value):
+                return "\(value) is not among this App ID's \(what). An App Store Connect key cannot assign \(what); sign once with a password login to assign it."
             case .invalidProfileData:
                 return "Apple returned an incomplete provisioning profile"
             case .conflictingProfileAssignments(let what):
@@ -243,11 +246,19 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                 entitlementsArray[groupsIdx] = AppGroupEntitlement(rawValue: newGroups)
             } else if let groupsIdx = entitlementsArray.firstIndex(where: { $0 is AppGroupEntitlement }),
                 let groupsEntitlement = entitlementsArray[groupsIdx] as? AppGroupEntitlement {
-                entitlementsArray[groupsIdx] = AppGroupEntitlement(rawValue: groupsEntitlement.rawValue.map {
-                    ProvisioningIdentifiers.groupID(
-                        fromSanitized: ProvisioningIdentifiers.sanitize(groupID: $0),
-                        context: self.context
-                    )
+                let held = try assigned(AppGroupEntitlement.identifier, "app groups", in: profiles, appID: appID)
+                entitlementsArray[groupsIdx] = AppGroupEntitlement(rawValue: try groupsEntitlement.rawValue.map { wanted in
+                    let sanitized = ProvisioningIdentifiers.sanitize(groupID: wanted)
+                    let computed = ProvisioningIdentifiers.groupID(fromSanitized: sanitized, context: self.context)
+                    guard let held else { return computed }
+                    if held.contains(computed.rawValue) { return computed }
+                    let matching = held.filter {
+                        ProvisioningIdentifiers.sanitize(groupID: .init(rawValue: $0)) == sanitized
+                    }
+                    guard matching.count == 1, let only = matching.first else {
+                        throw Error.notAssignedWithKey(what: "app groups", value: wanted.rawValue)
+                    }
+                    return .init(rawValue: only)
                 })
             }
 
@@ -265,12 +276,22 @@ public struct DeveloperServicesAddAppOperation: DeveloperServicesOperation {
                 entitlementsArray[containersIdx] = ICloudContainerIdentifiersEntitlement(rawValue: newContainers)
             } else if let containersIdx = entitlementsArray.firstIndex(where: { $0 is ICloudContainerIdentifiersEntitlement }),
                 let containersEntitlement = entitlementsArray[containersIdx] as? ICloudContainerIdentifiersEntitlement {
+                let held = try assigned(
+                    ICloudContainerIdentifiersEntitlement.identifier, "iCloud containers", in: profiles, appID: appID
+                )
                 entitlementsArray[containersIdx] = ICloudContainerIdentifiersEntitlement(
-                    rawValue: containersEntitlement.rawValue.map {
-                        ProvisioningIdentifiers.containerID(
-                            fromSanitized: ProvisioningIdentifiers.sanitize(containerID: $0),
-                            context: self.context
-                        )
+                    rawValue: try containersEntitlement.rawValue.map { wanted in
+                        let sanitized = ProvisioningIdentifiers.sanitize(containerID: wanted)
+                        let computed = ProvisioningIdentifiers.containerID(fromSanitized: sanitized, context: self.context)
+                        guard let held else { return computed }
+                        if held.contains(computed.rawValue) { return computed }
+                        let matching = held.filter {
+                            ProvisioningIdentifiers.sanitize(containerID: .init(rawValue: $0)) == sanitized
+                        }
+                        guard matching.count == 1, let only = matching.first else {
+                            throw Error.notAssignedWithKey(what: "iCloud containers", value: wanted.rawValue)
+                        }
+                        return .init(rawValue: only)
                     }
                 )
             }

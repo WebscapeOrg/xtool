@@ -17,9 +17,12 @@ public struct DeveloperServicesFetchCertificateOperation: DeveloperServicesOpera
     public enum Error: LocalizedError {
         case csrFailed
         case userCancelled
+        case keyTeamMismatch(expected: String, actual: String)
 
         public var errorDescription: String? {
             switch self {
+            case .keyTeamMismatch(let expected, let actual):
+                return "The App Store Connect key belongs to team \(actual), not \(expected). Log in again with the key's own team ID."
             case .csrFailed:
                 return NSLocalizedString(
                     "fetch_certificate_operation.error.csr_failed", value: "CSR request failed", comment: ""
@@ -89,6 +92,10 @@ public struct DeveloperServicesFetchCertificateOperation: DeveloperServicesOpera
             }
         }
         let signingInfo = try await createCertificate()
+        if case .appStoreConnect(let key) = context.auth, let teamID = key.teamID,
+           try signingInfo.certificate.teamID() != teamID {
+            throw Error.keyTeamMismatch(expected: teamID, actual: try signingInfo.certificate.teamID())
+        }
         signingInfoManager[self.context.auth.identityID] = signingInfo
         return signingInfo
     }

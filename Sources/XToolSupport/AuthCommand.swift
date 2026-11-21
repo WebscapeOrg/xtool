@@ -74,6 +74,10 @@ struct AuthOperation {
 
         let teamID = try await Console.prompt("Team ID (to sign as the team a password login used; blank for none): ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard teamID.isEmpty || (teamID.count == 10 && teamID.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }) else {
+            throw Console.Error("A team ID is 10 letters and digits, such as AB12CD34EF.")
+        }
 
         return AuthToken.appStoreConnect(.init(id: id, issuerID: issuerID, pem: pem, teamID: teamID.isEmpty ? nil : teamID))
     }
